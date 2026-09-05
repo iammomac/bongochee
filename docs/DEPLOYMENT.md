@@ -126,12 +126,35 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml logs -f backend
 #!/bin/sh
 cd /path/to/bongochee
 docker compose -f docker-compose.yml -f docker-compose.prod.yml exec -T db \
-  pg_dump -U "$(grep POSTGRES_USER backend/.env | cut -d= -f2)" \
+  pg_dump --clean --if-exists -U "$(grep POSTGRES_USER backend/.env | cut -d= -f2)" \
   "$(grep POSTGRES_DB backend/.env | cut -d= -f2)" \
   | gzip > "/var/backups/bongochee-$(date +%F).sql.gz"
 find /var/backups -name 'bongochee-*.sql.gz' -mtime +14 -delete
 ```
 Make it executable: `chmod +x /etc/cron.daily/bongochee-backup`.
+
+`--clean --if-exists` makes each dump self-contained (it drops existing
+tables before recreating them), so restoring never fails with "already
+exists" errors — no need to manually wipe the database first.
+
+**Restoring from a backup:** this is a terminal command, not a button in any
+panel — Hostinger's own VPS-level backups (full-server snapshots, restorable
+from their panel with one click) are a separate thing from this: this
+restores just your app's data from one of the `.sql.gz` files the cron job
+above produces.
+```bash
+# Stop the backend so nothing writes to the database mid-restore
+docker compose -f docker-compose.yml -f docker-compose.prod.yml stop backend
+
+# Pick the file to restore from, e.g. /var/backups/bongochee-2026-09-01.sql.gz
+gunzip -c /var/backups/bongochee-2026-09-01.sql.gz | \
+  docker compose -f docker-compose.yml -f docker-compose.prod.yml exec -T db \
+  psql -U "$(grep POSTGRES_USER backend/.env | cut -d= -f2)" \
+  "$(grep POSTGRES_DB backend/.env | cut -d= -f2)"
+
+# Bring the backend back up
+docker compose -f docker-compose.yml -f docker-compose.prod.yml start backend
+```
 
 **Rotating secrets**: change `DJANGO_SECRET_KEY` or `POSTGRES_PASSWORD` in
 `backend/.env`, then `docker compose ... up -d` to recreate the backend with the new
