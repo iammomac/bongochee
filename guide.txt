@@ -1,0 +1,260 @@
+===============================================================
+ BONGO CHEE — HOW TO RUN THE PROJECT ON YOUR OWN COMPUTER
+===============================================================
+
+This guide walks you through getting the Bongo Chee inventory system
+running on your own PC so you can view it in your browser at
+
+     http://localhost:5173
+
+No experience with Python, Django, or React is assumed — just follow
+the steps in order.
+
+This project has TWO parts that must both be running at the same
+time, plus a database:
+
+     backend/    -> Django (Python) — the API, port 8000
+     frontend/   -> React (Vite)    — the website, port 5173
+     PostgreSQL  -> the database
+
+
+---------------------------------------------------------------
+STEP 1 — Install Python (skip if already installed)
+---------------------------------------------------------------
+
+1. Go to https://python.org/downloads
+2. Download Python 3.12 or newer.
+3. Run the installer. IMPORTANT: on the very first screen, tick the
+   box that says "Add python.exe to PATH" before clicking Install.
+4. Confirm it worked — open a terminal:
+     - Windows: press Start, type "PowerShell", press Enter
+     - Mac: open "Terminal" from Spotlight
+   Then type:
+
+     python --version
+     pip --version
+
+   Both should print a version number (e.g. Python 3.12.4). If you
+   see "command not found", restart your computer and try again.
+
+
+---------------------------------------------------------------
+STEP 2 — Install Node.js (skip if already installed)
+---------------------------------------------------------------
+
+1. Go to https://nodejs.org
+2. Download the "LTS" version — this project was built on Node v20,
+   so any 20.x or newer LTS works.
+3. Run the installer with the default options.
+4. Confirm:
+
+     node -v
+     npm -v
+
+   Both should print a version number.
+
+
+---------------------------------------------------------------
+STEP 3 — Install PostgreSQL (skip if already installed)
+---------------------------------------------------------------
+
+1. Go to https://www.postgresql.org/download/
+2. Download and run the installer for your OS.
+3. During setup it asks you to set a password for the "postgres"
+   superuser — remember whatever you type here, you'll need it
+   in Step 5.
+4. Leave the port as the default: 5432
+5. It installs "pgAdmin" alongside it — a graphical tool for
+   managing databases. You'll use it in Step 4.
+
+
+---------------------------------------------------------------
+STEP 4 — Create the database
+---------------------------------------------------------------
+
+1. Open "pgAdmin" (installed in Step 3).
+2. Connect using the postgres password you set in Step 3.
+3. In the left-hand tree, right-click "Databases" -> Create ->
+   Database.
+4. Name it exactly:   bongochee
+5. Click Save.
+
+
+---------------------------------------------------------------
+STEP 5 — Get the project files
+---------------------------------------------------------------
+
+Get the "bongochee" project folder from whoever shared it with you
+(zip file, shared drive, USB, or GitHub). Make sure you have the
+WHOLE folder, including:
+
+     backend/
+     frontend/
+     docker-compose.yml
+
+If it's a .zip file, extract it somewhere easy to find, e.g.:
+
+     C:\Users\<yourname>\Documents\bongochee      (Windows)
+     ~/Documents/bongochee                        (Mac)
+
+If you were given a GitHub link instead, run this in a terminal
+(with Git installed — https://git-scm.com if you don't have it):
+
+     git clone <the repository URL>
+
+
+---------------------------------------------------------------
+STEP 6 — Set up the backend
+---------------------------------------------------------------
+
+Open a terminal inside the project's "backend" folder:
+
+     cd path\to\bongochee\backend
+
+Create and activate a virtual environment:
+
+   Windows (PowerShell):
+     python -m venv venv
+     venv\Scripts\Activate.ps1
+
+   Mac:
+     python3 -m venv venv
+     source venv/bin/activate
+
+Install the backend's dependencies:
+
+     pip install -r requirements.txt
+
+Set up the environment file:
+
+1. Find ".env.example" in the backend folder.
+2. Make a copy of it and rename the copy to ".env" (same folder).
+3. Open ".env" in Notepad/TextEdit and fill in:
+     - DJANGO_SECRET_KEY   -> any long random string of your choosing
+     - DJANGO_DEBUG        -> True
+     - POSTGRES_USER       -> postgres  (unless you made a different user)
+     - POSTGRES_PASSWORD   -> the password you set in Step 3
+     - POSTGRES_DB         -> bongochee
+
+Set up the database tables and permissions:
+
+     python manage.py migrate
+     python manage.py loaddata rbac/fixtures/permissions.json
+     python manage.py createsuperuser
+
+"createsuperuser" will ask you to pick your own admin username,
+email, and password — that's what you'll log in with later.
+
+Start the backend:
+
+     python manage.py runserver
+
+Wait for it to print "Starting development server at
+http://127.0.0.1:8000/" and then LEAVE THIS TERMINAL WINDOW OPEN.
+
+
+---------------------------------------------------------------
+STEP 7 — Set up the frontend
+---------------------------------------------------------------
+
+Open a SECOND, separate terminal window (don't close the backend
+one) inside the project's "frontend" folder:
+
+     cd path\to\bongochee\frontend
+
+Install dependencies:
+
+     npm install
+
+Set up the environment file:
+
+1. Find ".env.example" in the frontend folder.
+2. Make a copy of it and rename the copy to ".env"
+3. It should just contain this one line:
+
+     VITE_API_BASE_URL=http://localhost:8000/api/v1
+
+Start the frontend:
+
+     npm run dev
+
+Wait for it to print something like:
+
+     VITE v8.1.5  ready in 880 ms
+     ➜  Local:   http://localhost:5173/
+
+
+---------------------------------------------------------------
+STEP 8 — View it in your browser
+---------------------------------------------------------------
+
+With BOTH terminals still running (backend AND frontend), open any
+browser (Chrome, Edge, Firefox) and go to:
+
+     http://localhost:5173
+
+Log in with the admin username/password you created in Step 6.
+You should see the dashboard — everything runs entirely on your own
+computer, nothing is sent to the cloud/internet.
+
+
+---------------------------------------------------------------
+STEP 9 — Stopping it / running it again later
+---------------------------------------------------------------
+
+To stop: click into each terminal window and press Ctrl + C
+(do this in both the backend and frontend terminals).
+
+To run it again later, you don't need to repeat Steps 1-6 — just:
+
+   Terminal 1 (backend):
+     cd path\to\bongochee\backend
+     venv\Scripts\Activate.ps1        (Mac: source venv/bin/activate)
+     python manage.py runserver
+
+   Terminal 2 (frontend):
+     cd path\to\bongochee\frontend
+     npm run dev
+
+Then open http://localhost:5173 again.
+
+
+---------------------------------------------------------------
+TROUBLESHOOTING
+---------------------------------------------------------------
+
+"pip install" or "npm install" fails or hangs
+  - Check your internet connection.
+  - Frontend: delete the "node_modules" folder and
+    "package-lock.json" file, then run "npm install" again.
+
+"connection to server ... failed" / database errors
+  - Make sure PostgreSQL is actually running. On Windows, open
+    "Services" (Start -> type "services"), find something named
+    "postgresql-x64-..." and make sure its status is "Running".
+  - Double check POSTGRES_PASSWORD/POSTGRES_USER/POSTGRES_DB in
+    backend/.env match what you set up in Steps 3-4.
+
+Red error mentioning "DJANGO_SECRET_KEY" or "ImproperlyConfigured"
+  - Your backend/.env file is missing or DJANGO_DEBUG isn't set
+    to True. Re-check Step 6.
+
+"port already in use"
+  - Backend: run  python manage.py runserver 8001
+    then change frontend/.env to
+    VITE_API_BASE_URL=http://localhost:8001/api/v1
+  - Frontend: run  npm run dev -- --port 5174
+    and open http://localhost:5174 instead.
+
+Page loads but login fails
+  - Make sure the backend terminal is still open with no red
+    error text in it.
+  - Make sure you actually completed "python manage.py
+    createsuperuser" in Step 6 and remember that exact
+    username/password.
+
+Still stuck?
+  - Take a screenshot of the terminal error and send it to
+    whoever shared this project with you.
+
+===============================================================

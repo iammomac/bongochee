@@ -1,0 +1,18 @@
+[
+  {"codename": "view_dashboard", "label": "View Dashboard", "category": "general"},
+  {"codename": "add_stock", "label": "Add Stock", "category": "stock"},
+  {"codename": "edit_stock", "label": "Edit Stock", "category": "stock"},
+  {"codename": "delete_stock", "label": "Delete Stock", "category": "stock"},
+  {"codename": "create_sales", "label": "Create Sales", "category": "sales"},
+  {"codename": "edit_sales", "label": "Edit Sales", "category": "sales"},
+  {"codename": "delete_sales", "label": "Delete Sales", "category": "sales"},
+  {"codename": "create_returns", "label": "Create Returns", "category": "returns"},
+  {"codename": "edit_returns", "label": "Edit Returns", "category": "returns"},
+  {"codename": "view_reports", "label": "View Reports", "category": "reports"},
+  {"codename": "export_reports", "label": "Export Reports", "category": "reports"},
+  {"codename": "manage_users", "label": "Manage Users", "category": "admin"},
+  {"codename": "manage_roles", "label": "Manage Roles", "category": "admin"},
+  {"codename": "manage_suppliers", "label": "Manage Suppliers", "category": "admin"},
+  {"codename": "view_profit", "label": "View Profit", "category": "reports"},
+  {"codename": "view_logs", "label": "View Logs", "category": "admin"}
+]
