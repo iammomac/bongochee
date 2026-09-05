@@ -4,8 +4,12 @@ from django.contrib import admin
 from django.urls import include, path
 from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, SpectacularSwaggerView
 
+from config.backup_views import SystemBackupView, SystemRestoreView
+
 urlpatterns = [
     path("admin/", admin.site.urls),
+    path("api/v1/system/backup/", SystemBackupView.as_view(), name="system-backup"),
+    path("api/v1/system/restore/", SystemRestoreView.as_view(), name="system-restore"),
     path("api/v1/auth/", include("accounts.urls")),
     path("api/v1/rbac/", include("rbac.urls")),
     path("api/v1/catalog/", include("catalog.urls")),

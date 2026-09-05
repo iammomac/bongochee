@@ -11,6 +11,7 @@ import {
   Truck,
   Tag,
   ScrollText,
+  DatabaseBackup,
   ChevronLeft,
   ChevronRight,
   X,
@@ -39,6 +40,7 @@ const NAV = [
     perm: ["view_logs", "manage_users"] as PermissionCode[],
     adminOnly: false,
   },
+  { to: "/backup", label: "Backup & Restore", icon: DatabaseBackup, perm: null, adminOnly: true },
 ];
 
 function NavLinks({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: () => void }) {

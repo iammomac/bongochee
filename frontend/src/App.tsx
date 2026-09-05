@@ -16,6 +16,7 @@ import RolesPage from "./pages/roles/RolesPage";
 import SuppliersPage from "./pages/suppliers/SuppliersPage";
 import ForcePasswordChangePage from "./pages/auth/ForcePasswordChangePage";
 import ActivityLogPage from "./pages/logs/ActivityLogPage";
+import BackupPage from "./pages/system/BackupPage";
 
 const queryClient = new QueryClient();
 
@@ -56,6 +57,9 @@ export default function App() {
                 </Route>
                 <Route element={<ProtectedRoute requires={["view_logs", "manage_users"]} />}>
                   <Route path="/logs" element={<ActivityLogPage />} />
+                </Route>
+                <Route element={<ProtectedRoute adminOnly />}>
+                  <Route path="/backup" element={<BackupPage />} />
                 </Route>
               </Route>
             </Route>

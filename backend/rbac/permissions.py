@@ -17,6 +17,19 @@ class IsAdminOrSuper(BasePermission):
         return bool(user.is_superuser or (user.role and user.role.is_system_role))
 
 
+class IsSuperUser(BasePermission):
+    """
+    Stricter than IsAdminOrSuper: only the one true Django superuser passes — not
+    even the system "Admin" role. Reserved for operations too dangerous to trust
+    to any role, however configured (e.g. restoring the database wipes and
+    replaces every row in it).
+    """
+
+    def has_permission(self, request, view):
+        user = request.user
+        return bool(user and user.is_authenticated and user.is_superuser)
+
+
 class HasPermission(BasePermission):
     """
     Usage: add `required_permission = "add_stock"` (or a tuple for multiple, ANY-of)
