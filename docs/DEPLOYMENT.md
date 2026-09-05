@@ -95,15 +95,16 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml exec backend \
 docker compose -f docker-compose.yml -f docker-compose.prod.yml exec backend \
   python seed_data.py
 # Creates the permission catalog, the Admin/Manager roles, the "admin" system-role
-# account, and the "super" superuser (super / @Momac2703 — change this password
-# immediately after first login in production).
+# account, and the "super" superuser. Passwords for both come from SEED_SUPER_PASSWORD
+# and SEED_ADMIN_PASSWORD in backend/.env — set strong, unique values there before
+# running this for the first time (see backend/.env.example).
 
 docker compose -f docker-compose.yml -f docker-compose.prod.yml exec backend \
   python manage.py collectstatic --noinput
 ```
 
-Visit `https://bongochee.co.tz`, log in as `super`, and change that password right
-away — it's a known default, fine for local dev, not for a live server.
+Visit `https://bongochee.co.tz` and log in as `super` with the `SEED_SUPER_PASSWORD`
+you set in `backend/.env`.
 
 ## 5. Ongoing operations
 

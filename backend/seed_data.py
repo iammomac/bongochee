@@ -5,10 +5,21 @@ import django
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
 django.setup()
 
+from decouple import config
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ImproperlyConfigured
+
 from rbac.models import Permission, Role
 
 User = get_user_model()
+
+SEED_SUPER_PASSWORD = config("SEED_SUPER_PASSWORD", default="")
+SEED_ADMIN_PASSWORD = config("SEED_ADMIN_PASSWORD", default="")
+if not SEED_SUPER_PASSWORD:
+    raise ImproperlyConfigured(
+        "SEED_SUPER_PASSWORD is not set in .env. Set it before running seed_data.py "
+        "-- these accounts' passwords are never hardcoded in source."
+    )
 
 permission_codes = [
     ("view_dashboard", "View Dashboard", "general"),
@@ -44,7 +55,7 @@ manager_role.permissions.add(*Permission.objects.exclude(codename__in=["manage_r
 super_user, _ = User.objects.get_or_create(
     username="super", defaults={"email": "super@bongochee.com", "phone": "255700000001"}
 )
-super_user.set_password("@Momac2703")
+super_user.set_password(SEED_SUPER_PASSWORD)
 super_user.is_superuser = True
 super_user.is_staff = True
 super_user.is_active = True
@@ -60,11 +71,16 @@ if User.objects.filter(username="admin").exists():
         existing_admin.is_superuser = False
         existing_admin.role = admin_role
         existing_admin.save(update_fields=["is_superuser", "role"])
-else:
+elif SEED_ADMIN_PASSWORD:
     User.objects.create_user(
         username="admin",
         email="admin@bongochee.com",
-        password="Bongochee@2026",
+        password=SEED_ADMIN_PASSWORD,
         phone="255700000000",
         role=admin_role,
+    )
+else:
+    raise ImproperlyConfigured(
+        "SEED_ADMIN_PASSWORD is not set in .env -- required to create the 'admin' "
+        "account on first run."
     )
