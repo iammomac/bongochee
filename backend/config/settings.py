@@ -187,10 +187,15 @@ CSRF_TRUSTED_ORIGINS = list({
 # https://dash.cloudflare.com/?to=/:account/turnstile to get real site/secret keys.
 TURNSTILE_SECRET_KEY = config("TURNSTILE_SECRET_KEY", default="")
 
+# "Lax" for local/same-origin dev. Set COOKIE_SAMESITE=None in production when the
+# frontend and backend are on different hosts (e.g. two separate Render services) —
+# cross-site XHR/fetch never attaches a Lax cookie.
+COOKIE_SAMESITE = config("COOKIE_SAMESITE", default="Lax")
+
 SESSION_COOKIE_HTTPONLY = True
-SESSION_COOKIE_SAMESITE = "Lax"
+SESSION_COOKIE_SAMESITE = COOKIE_SAMESITE
 CSRF_COOKIE_HTTPONLY = False  # must be readable by JS to send X-CSRFToken header
-CSRF_COOKIE_SAMESITE = "Lax"
+CSRF_COOKIE_SAMESITE = COOKIE_SAMESITE
 SECURE_SSL_REDIRECT = not DEBUG
 SESSION_COOKIE_SECURE = not DEBUG
 CSRF_COOKIE_SECURE = not DEBUG

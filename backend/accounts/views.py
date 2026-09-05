@@ -39,7 +39,7 @@ def _set_auth_cookies(response, user):
         max_age=int(settings.SIMPLE_JWT["ACCESS_TOKEN_LIFETIME"].total_seconds()),
         httponly=True,
         secure=settings.SESSION_COOKIE_SECURE,
-        samesite="Lax",
+        samesite=settings.COOKIE_SAMESITE,
         path="/",
     )
     response.set_cookie(
@@ -48,7 +48,7 @@ def _set_auth_cookies(response, user):
         max_age=int(settings.SIMPLE_JWT["REFRESH_TOKEN_LIFETIME"].total_seconds()),
         httponly=True,
         secure=settings.SESSION_COOKIE_SECURE,
-        samesite="Lax",
+        samesite=settings.COOKIE_SAMESITE,
         path=REFRESH_COOKIE_PATH,
     )
 
