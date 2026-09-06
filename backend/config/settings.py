@@ -193,6 +193,17 @@ TURNSTILE_SECRET_KEY = config("TURNSTILE_SECRET_KEY", default="")
 # cross-site XHR/fetch never attaches a Lax cookie.
 COOKIE_SAMESITE = config("COOKIE_SAMESITE", default="Lax")
 
+# Unset (None) locally, where frontend and backend share one host anyway. Set to
+# ".yourdomain.com" in production whenever the frontend and backend live on
+# different subdomains of the same registrable domain (e.g. bongochee.cloud /
+# api.bongochee.cloud) -- without this, csrftoken is a host-only cookie scoped to
+# just the API's own subdomain, so the frontend's JS (running on the OTHER
+# subdomain) can never read it via document.cookie to attach the X-CSRFToken
+# header. The cookie still reaches the API fine either way (the browser attaches
+# it to requests based on the request's target, not the page's origin) -- only
+# reading it from JS on a sibling subdomain requires this.
+CSRF_COOKIE_DOMAIN = config("COOKIE_DOMAIN", default=None)
+
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = COOKIE_SAMESITE
 CSRF_COOKIE_HTTPONLY = False  # must be readable by JS to send X-CSRFToken header
