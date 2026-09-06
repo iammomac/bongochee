@@ -149,6 +149,32 @@ class SaleTests(APITestCase):
         )
         self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
 
+    def test_sale_without_imei_is_accepted(self):
+        res = self.client.post(
+            "/api/v1/sales/sales/",
+            self._sale_payload([{"stockItem": str(self.stock_item.id), "imei": "", "sellingPrice": "650000"}]),
+            format="json",
+        )
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+        item = SaleItem.objects.get(sale_id=res.data["id"])
+        self.assertIsNone(item.imei)
+
+    def test_multiple_items_without_imei_do_not_collide(self):
+        # Blank IMEIs must be stored as NULL, not "" -- otherwise the second item
+        # here would hit the unique constraint as a false "duplicate".
+        res = self.client.post(
+            "/api/v1/sales/sales/",
+            self._sale_payload(
+                [
+                    {"stockItem": str(self.stock_item.id), "imei": "", "sellingPrice": "650000"},
+                    {"stockItem": str(self.stock_item.id), "imei": "", "sellingPrice": "650000"},
+                ]
+            ),
+            format="json",
+        )
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(SaleItem.objects.filter(imei__isnull=True).count(), 2)
+
     def test_only_delete_sales_permission_can_delete(self):
         sale = Sale.objects.create(
             invoice_number="INV-DEL-1", customer_name="X", payment_method="cash", sold_by=self.seller
