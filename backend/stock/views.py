@@ -2,6 +2,7 @@ import openpyxl
 from django.http import HttpResponse
 from openpyxl.styles import Alignment, Font, PatternFill
 from rest_framework import mixins, status, viewsets
+from rest_framework.exceptions import ValidationError
 from rest_framework.parsers import MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -28,12 +29,16 @@ class StockItemViewSet(
     mixins.ListModelMixin,
     mixins.RetrieveModelMixin,
     mixins.UpdateModelMixin,
+    mixins.DestroyModelMixin,
     viewsets.GenericViewSet,
 ):
-    """Read-only for browsing/searching available stock, plus edit (PATCH/PUT) for
-    correcting an existing line item's category/model/quantity/pricing. Intentionally
-    no create/destroy here — batches are created via StockInViewSet, and removing an
-    item outright would orphan any sales that reference it."""
+    """Read-only for browsing/searching available stock, edit (PATCH/PUT) for
+    correcting an existing line item's category/model/quantity/pricing, and delete
+    for undoing a line entered by mistake. Deleting is only allowed before anything's
+    been sold from it -- SaleItem.stock_item is on_delete=PROTECT, so a line that's
+    ever had a sale against it can't be removed without orphaning that sale's record;
+    perform_destroy below rejects that case with a clean error instead of a raw
+    IntegrityError. No create here -- batches are created via StockInViewSet."""
 
     queryset = (
         StockItem.objects.select_related("stock_in__supplier", "category", "model")
@@ -51,11 +56,18 @@ class StockItemViewSet(
     search_fields = ["category__name", "model__name"]
 
     def get_permissions(self):
-        self.required_permission = "edit_stock" if self.action in ("update", "partial_update") else (
-            "add_stock",
-            "create_sales",
-        )
+        if self.action in ("update", "partial_update"):
+            self.required_permission = "edit_stock"
+        elif self.action == "destroy":
+            self.required_permission = "delete_stock"
+        else:
+            self.required_permission = ("add_stock", "create_sales")
         return super().get_permissions()
+
+    def perform_destroy(self, instance):
+        if instance.sale_items.exists():
+            raise ValidationError({"detail": "Can't delete — some of this stock has already been sold."})
+        instance.delete()
 
 
 # Header synonyms accepted in an uploaded sheet, matched case-insensitively.

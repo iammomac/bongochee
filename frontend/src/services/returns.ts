@@ -38,3 +38,14 @@ export async function updateReturnStatus(id: string, status: ReturnStatus) {
   const { data } = await api.patch<ReturnRecord>(`/returns/returns/${id}/`, { status });
   return data;
 }
+
+export interface ReturnUpdatePayload {
+  returnDate?: string;
+  returnCategory?: ReturnCategory;
+  description?: string;
+}
+
+export async function updateReturn(id: string, payload: ReturnUpdatePayload) {
+  const { data } = await api.patch<ReturnRecord>(`/returns/returns/${id}/`, payload);
+  return data;
+}

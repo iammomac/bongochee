@@ -8,6 +8,7 @@ import { CategoryPicker } from "../../components/CategoryPicker";
 import { ModelPicker } from "../../components/ModelPicker";
 import {
   createStockIn,
+  deleteStockItem,
   downloadStockImportTemplate,
   importStockExcel,
   listRecentStockItems,
@@ -27,6 +28,7 @@ const rowSchema = z
     buyingPrice: z.number({ invalid_type_error: "Required" }).positive("Must be > 0"),
     minSellingPrice: z.number({ invalid_type_error: "Required" }).positive("Must be > 0"),
     maxSellingPrice: z.number({ invalid_type_error: "Required" }).positive("Must be > 0"),
+    notes: z.string().optional(),
     importError: z.string().nullable().optional(),
   })
   .refine((row) => row.maxSellingPrice >= row.minSellingPrice, {
@@ -54,6 +56,7 @@ const blankRow = {
   buyingPrice: 0,
   minSellingPrice: 0,
   maxSellingPrice: 0,
+  notes: "",
   importError: null as string | null,
 };
 
@@ -171,6 +174,14 @@ function StockRow({ index, control, register, setValue, errors, onRemove, canRem
           ) : null}
         </div>
       </div>
+      <div className="mt-3">
+        <label className="mb-1 block text-xs font-medium text-gray-500">Notes (condition)</label>
+        <input
+          {...register(`rows.${index}.notes`)}
+          placeholder="e.g. full box, used, screen scratch"
+          className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm outline-none focus:border-primary dark:border-gray-800 dark:bg-gray-950"
+        />
+      </div>
     </div>
   );
 }
@@ -185,6 +196,7 @@ const editSchema = z
     buyingPrice: z.number({ invalid_type_error: "Required" }).positive("Must be > 0"),
     minSellingPrice: z.number({ invalid_type_error: "Required" }).positive("Must be > 0"),
     maxSellingPrice: z.number({ invalid_type_error: "Required" }).positive("Must be > 0"),
+    notes: z.string().optional(),
   })
   .refine((row) => row.maxSellingPrice >= row.minSellingPrice, {
     message: "Max must be ≥ min",
@@ -218,6 +230,7 @@ function EditStockItemModal({ item, onClose, onSaved }: EditStockItemModalProps)
       buyingPrice: item.buyingPrice,
       minSellingPrice: item.minSellingPrice,
       maxSellingPrice: item.maxSellingPrice,
+      notes: item.notes,
     },
   });
   const categoryId = useWatch({ control, name: "categoryId" });
@@ -238,6 +251,7 @@ function EditStockItemModal({ item, onClose, onSaved }: EditStockItemModalProps)
         buyingPrice: values.buyingPrice,
         minSellingPrice: values.minSellingPrice,
         maxSellingPrice: values.maxSellingPrice,
+        notes: values.notes,
       });
       onSaved();
       onClose();
@@ -330,6 +344,14 @@ function EditStockItemModal({ item, onClose, onSaved }: EditStockItemModalProps)
               {errors.maxSellingPrice ? <p className="mt-1 text-xs text-danger">{errors.maxSellingPrice.message}</p> : null}
             </div>
           </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-gray-500">Notes (condition)</label>
+            <input
+              {...register("notes")}
+              placeholder="e.g. full box, used, screen scratch"
+              className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm outline-none focus:border-primary dark:border-gray-800 dark:bg-gray-950"
+            />
+          </div>
           <p className="text-xs text-gray-400">
             Remaining quantity ({item.quantityRemaining}) isn't editable here — it only changes as units sell.
           </p>
@@ -363,8 +385,11 @@ export default function StockPage() {
   const [downloadingTemplate, setDownloadingTemplate] = useState(false);
   const [recentItems, setRecentItems] = useState<StockItem[]>([]);
   const [editingItem, setEditingItem] = useState<StockItem | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const canEdit = has("edit_stock");
+  const canDelete = has("delete_stock");
 
   const {
     control,
@@ -397,6 +422,20 @@ export default function StockPage() {
   useEffect(() => {
     loadRecentItems();
   }, []);
+
+  const handleDelete = async (id: string) => {
+    setServerError(null);
+    setDeletingId(id);
+    try {
+      await deleteStockItem(id);
+      setConfirmDeleteId(null);
+      loadRecentItems();
+    } catch (err) {
+      setServerError(extractErrorMessage(err, "Unable to delete this stock item"));
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   const supplierValue: Supplier | null = supplierId
     ? { id: supplierId, name: supplierName, phone: "", address: "", email: "", notes: "", createdAt: "" }
@@ -459,6 +498,7 @@ export default function StockPage() {
           buyingPrice: row.buyingPrice,
           minSellingPrice: row.minSellingPrice,
           maxSellingPrice: row.maxSellingPrice,
+          notes: row.notes,
         })),
       });
       setSuccessMessage("Stock batch saved");
@@ -598,13 +638,16 @@ export default function StockPage() {
               <th className="px-4 py-3">Model</th>
               <th className="px-4 py-3">Qty</th>
               <th className="px-4 py-3">Buying price</th>
+              <th className="px-4 py-3">Notes</th>
               <th className="px-4 py-3">Status</th>
-              {canEdit ? <th className="px-4 py-3" /> : null}
+              {canEdit || canDelete ? <th className="px-4 py-3" /> : null}
             </tr>
           </thead>
           <tbody>
             {recentItems.map((item) => {
               const status = stockStatus(item.quantityRemaining);
+              // Nothing's been sold from this line yet -- safe to remove outright.
+              const canDeleteThisItem = canDelete && item.quantityRemaining === item.quantity;
               return (
                 <tr key={item.id} className="border-t border-gray-100 dark:border-gray-800">
                   <td className="px-4 py-3">{item.supplierName}</td>
@@ -612,21 +655,59 @@ export default function StockPage() {
                   <td className="px-4 py-3">{item.modelName}</td>
                   <td className="px-4 py-3">{item.quantityRemaining}</td>
                   <td className="px-4 py-3">TZS {currency(item.buyingPrice)}</td>
+                  <td className="max-w-[12rem] truncate px-4 py-3 text-gray-500" title={item.notes || undefined}>
+                    {item.notes || "—"}
+                  </td>
                   <td className="px-4 py-3">
                     <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${status.className}`}>
                       {status.label}
                     </span>
                   </td>
-                  {canEdit ? (
+                  {canEdit || canDelete ? (
                     <td className="px-4 py-3 text-right">
-                      <button
-                        type="button"
-                        onClick={() => setEditingItem(item)}
-                        className="flex items-center gap-1 text-xs font-medium text-primary hover:underline"
-                      >
-                        <Pencil size={14} />
-                        Edit
-                      </button>
+                      {confirmDeleteId === item.id ? (
+                        <div className="flex items-center justify-end gap-2">
+                          <span className="text-xs text-gray-400">Delete this line?</span>
+                          <button
+                            type="button"
+                            onClick={() => void handleDelete(item.id)}
+                            disabled={deletingId === item.id}
+                            className="text-xs font-medium text-danger hover:underline disabled:opacity-50"
+                          >
+                            {deletingId === item.id ? "Deleting…" : "Confirm"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeleteId(null)}
+                            className="text-xs font-medium text-gray-400 hover:underline"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-end gap-3">
+                          {canEdit ? (
+                            <button
+                              type="button"
+                              onClick={() => setEditingItem(item)}
+                              className="flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+                            >
+                              <Pencil size={14} />
+                              Edit
+                            </button>
+                          ) : null}
+                          {canDeleteThisItem ? (
+                            <button
+                              type="button"
+                              onClick={() => setConfirmDeleteId(item.id)}
+                              className="flex items-center gap-1 text-xs font-medium text-danger hover:underline"
+                            >
+                              <Trash2 size={14} />
+                              Delete
+                            </button>
+                          ) : null}
+                        </div>
+                      )}
                     </td>
                   ) : null}
                 </tr>
@@ -634,7 +715,7 @@ export default function StockPage() {
             })}
             {recentItems.length === 0 ? (
               <tr>
-                <td colSpan={canEdit ? 7 : 6} className="px-4 py-8 text-center text-sm text-gray-400">
+                <td colSpan={canEdit || canDelete ? 8 : 7} className="px-4 py-8 text-center text-sm text-gray-400">
                   No stock recorded yet
                 </td>
               </tr>

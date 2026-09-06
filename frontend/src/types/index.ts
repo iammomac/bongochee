@@ -94,6 +94,7 @@ export interface StockItem {
   buyingPrice: number;
   minSellingPrice: number;
   maxSellingPrice: number;
+  notes: string;
 }
 
 export type PaymentMethod = "cash" | "mobile_money" | "card";

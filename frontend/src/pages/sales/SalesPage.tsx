@@ -144,6 +144,7 @@ function PhoneEntryPanel({ existingImeis, onAddToCart }: PhoneEntryPanelProps) {
             {phone.quantityRemaining} available · floor TZS {currency(phone.minSellingPrice)} · asking TZS{" "}
             {currency(phone.maxSellingPrice)}
           </p>
+          {phone.notes ? <p className="mt-1 text-xs text-gray-400">Condition: {phone.notes}</p> : null}
         </div>
       ) : null}
 

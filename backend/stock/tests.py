@@ -9,6 +9,7 @@ from rest_framework.test import APITestCase
 from accounts.models import User
 from catalog.models import Category, PhoneModel
 from rbac.models import Permission, Role
+from sales.models import Sale, SaleItem
 from stock.models import StockIn, StockItem
 from suppliers.models import Supplier
 
@@ -162,6 +163,97 @@ class StockItemAccessTests(APITestCase):
         ]
         self.assertIn(str(self.in_stock.id), ids)
         self.assertNotIn(str(self.sold_out.id), ids)
+
+
+class StockItemDeleteTests(APITestCase):
+    def setUp(self):
+        add_perm = Permission.objects.create(codename="add_stock", label="Add Stock", category="stock")
+        delete_perm = Permission.objects.create(codename="delete_stock", label="Delete Stock", category="stock")
+        role = Role.objects.create(name="Stocker")
+        role.permissions.add(add_perm, delete_perm)
+        self.stocker = User.objects.create_user(
+            username="stocker4", password="Str0ngPassw0rd!", phone="255700000053", role=role, must_change_password=False
+        )
+
+        add_only_role = Role.objects.create(name="StockerNoDelete")
+        add_only_role.permissions.add(add_perm)
+        self.stocker_no_delete = User.objects.create_user(
+            username="stocker5", password="Str0ngPassw0rd!", phone="255700000054", role=add_only_role, must_change_password=False
+        )
+
+        supplier = Supplier.objects.create(name="Blue Telecom")
+        category = Category.objects.create(name="Samsung")
+        model = PhoneModel.objects.create(category=category, name="Galaxy A56")
+        self.stock_in = StockIn.objects.create(supplier=supplier, import_date=date.today(), created_by=self.stocker)
+        self.untouched = StockItem.objects.create(
+            stock_in=self.stock_in, category=category, model=model,
+            quantity=5, quantity_remaining=5,
+            buying_price="500000", min_selling_price="600000", max_selling_price="700000",
+        )
+        self.partially_sold = StockItem.objects.create(
+            stock_in=self.stock_in, category=category, model=model,
+            quantity=5, quantity_remaining=4,
+            buying_price="500000", min_selling_price="600000", max_selling_price="700000",
+        )
+        sale = Sale.objects.create(invoice_number="INV-DEL-1", customer_name="X", payment_method="cash", sold_by=self.stocker)
+        SaleItem.objects.create(sale=sale, stock_item=self.partially_sold, selling_price="650000")
+
+    def test_untouched_line_can_be_deleted(self):
+        self.client.force_authenticate(self.stocker)
+        res = self.client.delete(f"/api/v1/stock/stock-items/{self.untouched.id}/")
+        self.assertEqual(res.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(StockItem.objects.filter(id=self.untouched.id).exists())
+
+    def test_line_with_a_sale_against_it_cannot_be_deleted(self):
+        self.client.force_authenticate(self.stocker)
+        res = self.client.delete(f"/api/v1/stock/stock-items/{self.partially_sold.id}/")
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertTrue(StockItem.objects.filter(id=self.partially_sold.id).exists())
+
+    def test_user_without_delete_stock_permission_is_denied(self):
+        self.client.force_authenticate(self.stocker_no_delete)
+        res = self.client.delete(f"/api/v1/stock/stock-items/{self.untouched.id}/")
+        self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertTrue(StockItem.objects.filter(id=self.untouched.id).exists())
+
+
+class StockItemNotesTests(APITestCase):
+    def setUp(self):
+        perm = Permission.objects.create(codename="add_stock", label="Add Stock", category="stock")
+        role = Role.objects.create(name="Stocker")
+        role.permissions.add(perm)
+        self.user = User.objects.create_user(
+            username="stocker6", password="Str0ngPassw0rd!", phone="255700000055", role=role, must_change_password=False
+        )
+        self.client.force_authenticate(self.user)
+        self.supplier = Supplier.objects.create(name="Blue Telecom")
+
+    def test_notes_saved_and_returned_per_line(self):
+        category = Category.objects.create(name="Samsung")
+        model = PhoneModel.objects.create(category=category, name="Galaxy A56")
+        res = self.client.post(
+            "/api/v1/stock/stock-ins/",
+            {
+                "supplier": str(self.supplier.id),
+                "importDate": str(date.today()),
+                "items": [
+                    {
+                        "category": str(category.id), "model": str(model.id),
+                        "quantity": 2, "buyingPrice": "500000",
+                        "minSellingPrice": "600000", "maxSellingPrice": "700000",
+                        "notes": "Full box, unused",
+                    }
+                ],
+            },
+            format="json",
+        )
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+        item = StockItem.objects.get()
+        self.assertEqual(item.notes, "Full box, unused")
+        list_res = self.client.get("/api/v1/stock/stock-items/")
+        body = list_res.json()
+        rows = body["results"] if "results" in body else body
+        self.assertEqual(rows[0]["notes"], "Full box, unused")
 
 
 class StockImportTemplateTests(APITestCase):

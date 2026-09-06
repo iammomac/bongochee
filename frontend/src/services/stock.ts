@@ -9,6 +9,7 @@ export interface StockInItemPayload {
   buyingPrice: number;
   minSellingPrice: number;
   maxSellingPrice: number;
+  notes?: string;
 }
 
 export interface StockInPayload {
@@ -56,11 +57,16 @@ export interface StockItemUpdatePayload {
   buyingPrice: number;
   minSellingPrice: number;
   maxSellingPrice: number;
+  notes?: string;
 }
 
 export async function updateStockItem(id: string, payload: StockItemUpdatePayload) {
   const { data } = await api.patch<StockItem>(`/stock/stock-items/${id}/`, payload);
   return data;
+}
+
+export async function deleteStockItem(id: string) {
+  await api.delete(`/stock/stock-items/${id}/`);
 }
 
 export async function downloadStockImportTemplate() {

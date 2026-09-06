@@ -36,6 +36,10 @@ class StockItem(models.Model):
     buying_price = models.DecimalField(max_digits=12, decimal_places=2)
     min_selling_price = models.DecimalField(max_digits=12, decimal_places=2)
     max_selling_price = models.DecimalField(max_digits=12, decimal_places=2)
+    # Per-unit/line condition -- e.g. "full box", "used, screen scratch" -- distinct
+    # from StockIn.notes (a general remark about the whole invoice/batch), since a
+    # single batch can mix models/conditions across its rows.
+    notes = models.TextField(blank=True)
 
     class Meta:
         db_table = "stock_items"

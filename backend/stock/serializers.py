@@ -24,6 +24,7 @@ class StockItemSerializer(serializers.ModelSerializer):
             "buying_price",
             "min_selling_price",
             "max_selling_price",
+            "notes",
         )
         # quantity_remaining is always server-derived from quantity at creation time
         # (see StockInSerializer.create) and only ever decremented by sales afterward —

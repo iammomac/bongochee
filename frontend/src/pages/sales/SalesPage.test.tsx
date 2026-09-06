@@ -22,6 +22,7 @@ const phone: AvailablePhone = {
   importDate: "2026-01-01",
   quantity: 5,
   quantityRemaining: 5,
+  notes: "",
   buyingPrice: 500000,
   minSellingPrice: 600000,
   maxSellingPrice: 700000,

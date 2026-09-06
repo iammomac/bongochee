@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Check, ChevronDown, Plus, Search, Upload, X } from "lucide-react";
+import { Check, ChevronDown, Pencil, Plus, Search, Upload, X } from "lucide-react";
 import { Select } from "../../components/Select";
 import { useDropdownPosition } from "../../hooks/useDropdownPosition";
 import {
   createReturn,
   listRecentReturns,
   lookupSaleItem,
+  updateReturn,
   updateReturnStatus,
   uploadReturnPhoto,
 } from "../../services/returns";
@@ -97,6 +98,110 @@ function StatusSelect({ value, onChange }: { value: ReturnStatus; onChange: (sta
   );
 }
 
+interface EditReturnModalProps {
+  returnRecord: ReturnRecord;
+  onClose: () => void;
+  onSaved: () => void;
+}
+
+function EditReturnModal({ returnRecord, onClose, onSaved }: EditReturnModalProps) {
+  const [returnDate, setReturnDate] = useState(returnRecord.returnDate);
+  const [returnCategory, setReturnCategory] = useState<ReturnCategory>(returnRecord.returnCategory);
+  const [description, setDescription] = useState(returnRecord.description);
+  const [submitting, setSubmitting] = useState(false);
+  const [serverError, setServerError] = useState<string | null>(null);
+
+  const handleSubmit = async () => {
+    setSubmitting(true);
+    setServerError(null);
+    try {
+      await updateReturn(returnRecord.id, { returnDate, returnCategory, description });
+      onSaved();
+      onClose();
+    } catch (err) {
+      setServerError(extractErrorMessage(err, "Unable to save these changes"));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="absolute inset-0" onClick={onClose} />
+      <div className="relative w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl dark:bg-gray-900">
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-lg font-semibold">Edit return — {returnRecord.invoiceNumber}</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-xl p-1.5 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
+            aria-label="Close"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        {serverError ? <p className="mb-3 rounded-xl bg-danger/10 px-3 py-2 text-xs text-danger">{serverError}</p> : null}
+
+        <p className="mb-3 text-xs text-gray-400">
+          {returnRecord.categoryName} {returnRecord.modelName} · IMEI: {returnRecord.imei || "—"} · phone/sale can't
+          change here
+        </p>
+
+        <div className="space-y-4">
+          <div className="grid gap-3 md:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-xs font-medium text-gray-500">Return date</label>
+              <input
+                type="date"
+                value={returnDate}
+                onChange={(e) => setReturnDate(e.target.value)}
+                className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm outline-none focus:border-primary dark:border-gray-800 dark:bg-gray-950"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-gray-500">Return category</label>
+              <Select value={returnCategory} onChange={(v) => setReturnCategory(v as ReturnCategory)}>
+                {RETURN_CATEGORIES.map((cat) => (
+                  <option key={cat.value} value={cat.value}>
+                    {cat.label}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-gray-500">Description</label>
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              rows={3}
+              className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm outline-none focus:border-primary dark:border-gray-800 dark:bg-gray-950"
+            />
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-xl border border-gray-200 px-4 py-2 text-sm text-gray-500 dark:border-gray-800"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleSubmit()}
+              disabled={submitting}
+              className="rounded-xl bg-primary px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
+            >
+              {submitting ? "Saving…" : "Save changes"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function ReturnsPage() {
   const { has } = usePermissions();
   const canEdit = has("edit_returns");
@@ -116,6 +221,7 @@ export default function ReturnsPage() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   const [recentReturns, setRecentReturns] = useState<ReturnRecord[]>([]);
+  const [editingReturn, setEditingReturn] = useState<ReturnRecord | null>(null);
 
   const loadRecentReturns = () => {
     listRecentReturns()
@@ -387,6 +493,7 @@ export default function ReturnsPage() {
               <th className="px-4 py-3">Category</th>
               <th className="px-4 py-3">Date</th>
               <th className="px-4 py-3">Status</th>
+              {canEdit ? <th className="px-4 py-3" /> : null}
             </tr>
           </thead>
           <tbody>
@@ -414,11 +521,23 @@ export default function ReturnsPage() {
                     </span>
                   )}
                 </td>
+                {canEdit ? (
+                  <td className="px-4 py-3 text-right">
+                    <button
+                      type="button"
+                      onClick={() => setEditingReturn(ret)}
+                      className="flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+                    >
+                      <Pencil size={14} />
+                      Edit
+                    </button>
+                  </td>
+                ) : null}
               </tr>
             ))}
             {recentReturns.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-4 py-8 text-center text-sm text-gray-400">
+                <td colSpan={canEdit ? 8 : 7} className="px-4 py-8 text-center text-sm text-gray-400">
                   No returns recorded yet
                 </td>
               </tr>
@@ -426,6 +545,14 @@ export default function ReturnsPage() {
           </tbody>
         </table>
       </div>
+
+      {editingReturn ? (
+        <EditReturnModal
+          returnRecord={editingReturn}
+          onClose={() => setEditingReturn(null)}
+          onSaved={loadRecentReturns}
+        />
+      ) : null}
     </div>
   );
 }
