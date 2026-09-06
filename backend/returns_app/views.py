@@ -1,3 +1,5 @@
+from django.core.exceptions import ValidationError
+from django.core.validators import FileExtensionValidator
 from django.db.models import Q
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
@@ -7,6 +9,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from activitylog.services import log_action
+from config.validators import ALLOWED_IMAGE_EXTENSIONS, validate_image_size
 from notifications.services import notify_permission_holders
 from rbac.permissions import HasPermission
 from returns_app.models import Return, ReturnPhoto
@@ -85,6 +88,14 @@ class ReturnViewSet(viewsets.ModelViewSet):
         image = request.FILES.get("image")
         if not image:
             return Response({"detail": "No image uploaded"}, status=status.HTTP_400_BAD_REQUEST)
+        # ReturnPhoto.image declares these same validators, but model-field validators
+        # only run through full_clean() (a ModelForm, or calling it explicitly) -- never
+        # on plain .objects.create() -- so they're enforced by hand here instead.
+        try:
+            validate_image_size(image)
+            FileExtensionValidator(ALLOWED_IMAGE_EXTENSIONS)(image)
+        except ValidationError as exc:
+            return Response({"detail": exc.messages[0]}, status=status.HTTP_400_BAD_REQUEST)
         photo = ReturnPhoto.objects.create(return_record=return_record, image=image)
         return Response(
             ReturnPhotoSerializer(photo, context={"request": request}).data, status=status.HTTP_201_CREATED
