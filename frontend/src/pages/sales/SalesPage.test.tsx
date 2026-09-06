@@ -52,12 +52,15 @@ const mockSale: Sale = {
 };
 
 describe("SalesPage", () => {
+  let openSpy: ReturnType<typeof vi.spyOn>;
+
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(salesService.listRecentSales).mockResolvedValue([]);
     vi.mocked(salesService.searchAvailableStock).mockResolvedValue([phone]);
     vi.mocked(salesService.createSale).mockResolvedValue(mockSale);
     vi.mocked(usePermissions).mockReturnValue({ has: () => true, isAdminOrSuper: true });
+    openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
   });
 
   it("adds a phone at a bargained price with a discount and submits the sale with the net breakdown", async () => {
@@ -109,6 +112,36 @@ describe("SalesPage", () => {
           }),
         ],
       }),
+    );
+    // mockSale has no customerPhone -- nothing to send a receipt to.
+    expect(openSpy).not.toHaveBeenCalled();
+  }, 15000);
+
+  it("automatically opens WhatsApp with the receipt right after the sale completes, when the customer has a phone", async () => {
+    vi.mocked(salesService.createSale).mockResolvedValue({ ...mockSale, customerPhone: "0712345678" });
+
+    const user = userEvent.setup();
+    render(<SalesPage />);
+
+    const [customerNameInput] = screen.getAllByRole("textbox");
+    await user.type(customerNameInput, "Amina Yusuf");
+
+    const searchInput = screen.getByPlaceholderText(/search by category or model/i);
+    await user.click(searchInput);
+    await user.type(searchInput, "Galaxy");
+    const resultButton = await screen.findByRole("button", { name: "Samsung Galaxy A56" });
+    await user.click(resultButton);
+
+    await user.click(screen.getByRole("button", { name: /continue/i }));
+    await user.click(screen.getByRole("button", { name: /add to sale/i }));
+    await user.click(screen.getByRole("button", { name: /complete sale/i }));
+
+    await waitFor(() => expect(openSpy).toHaveBeenCalled());
+    // Local 0-prefixed numbers become 255-prefixed for the wa.me link.
+    expect(openSpy).toHaveBeenCalledWith(
+      expect.stringContaining("https://wa.me/255712345678?text="),
+      "_blank",
+      "noopener,noreferrer",
     );
   }, 15000);
 

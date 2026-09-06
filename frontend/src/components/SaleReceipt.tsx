@@ -1,36 +1,9 @@
 import { MessageCircle, Printer, X } from "lucide-react";
 import type { Sale } from "../types";
+import { openWhatsAppReceipt, saleTotal } from "../lib/whatsapp";
 import logo from "../assets/logo-trimmed.png";
 
 const currency = (value: number) => new Intl.NumberFormat("en-TZ", { maximumFractionDigits: 0 }).format(value);
-
-// wa.me needs the full international number, digits only, no leading 0/+.
-// Local Tanzanian numbers are usually entered as 0XXXXXXXXX — swap the leading 0
-// for the country code; anything already in international form passes through.
-function toWhatsAppNumber(phone: string) {
-  const digits = phone.replace(/\D/g, "");
-  if (digits.startsWith("0")) return `255${digits.slice(1)}`;
-  return digits;
-}
-
-function buildReceiptMessage(sale: Sale, total: number) {
-  const lines = [
-    "BONGO CHEE — Receipt",
-    `Invoice: ${sale.invoiceNumber}`,
-    `Date: ${new Date(sale.createdAt).toLocaleString()}`,
-    "",
-    ...sale.items.map((item) => {
-      const net = item.sellingPrice - item.discount;
-      const discountNote = item.discount ? ` (discount TZS ${currency(item.discount)})` : "";
-      return `${item.categoryName} ${item.modelName} — TZS ${currency(net)}${discountNote}`;
-    }),
-    "",
-    `Total: TZS ${currency(total)}`,
-    "",
-    "Thank you for shopping with BONGO CHEE",
-  ];
-  return lines.join("\n");
-}
 
 interface Props {
   sale: Sale;
@@ -38,14 +11,12 @@ interface Props {
 }
 
 export function SaleReceipt({ sale, onClose }: Props) {
-  const total = sale.items.reduce((sum, item) => sum + (item.sellingPrice - item.discount), 0);
+  const total = saleTotal(sale);
 
-  const sendViaWhatsApp = () => {
-    if (!sale.customerPhone) return;
-    const number = toWhatsAppNumber(sale.customerPhone);
-    const text = encodeURIComponent(buildReceiptMessage(sale, total));
-    window.open(`https://wa.me/${number}?text=${text}`, "_blank", "noopener,noreferrer");
-  };
+  // The real send already fires automatically right after the sale completes (see
+  // SalesPage's onSubmit) — this button is the fallback for when that got silently
+  // blocked as a popup, or the WhatsApp tab/window was closed by mistake.
+  const sendViaWhatsApp = () => openWhatsAppReceipt(sale);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">

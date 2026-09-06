@@ -8,6 +8,7 @@ import { SaleReceipt } from "../../components/SaleReceipt";
 import { Select } from "../../components/Select";
 import { searchAvailableStock, createSale, listRecentSales, updateSale } from "../../services/sales";
 import { extractErrorMessage } from "../../lib/errors";
+import { openWhatsAppReceipt } from "../../lib/whatsapp";
 import { usePermissions } from "../../hooks/usePermissions";
 import type { AvailablePhone, PaymentMethod, Sale } from "../../types";
 
@@ -453,6 +454,12 @@ export default function SalesPage() {
           discount: line.discount,
         })),
       });
+      // Fired here, immediately after the same click that submitted the form —
+      // not later (e.g. when the receipt below mounts) — since browsers are prone
+      // to silently blocking a window.open() the further it drifts from the
+      // original user gesture. The receipt's own button is the manual fallback if
+      // this one gets blocked.
+      if (sale.customerPhone) openWhatsAppReceipt(sale);
       setReceiptSale(sale);
       setCart([]);
       reset(defaultHeaderValues());
