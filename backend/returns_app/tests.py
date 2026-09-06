@@ -25,8 +25,9 @@ def tiny_png():
 class ReturnsTests(APITestCase):
     def setUp(self):
         perm = Permission.objects.create(codename="create_returns", label="Create Returns", category="returns")
+        edit_perm = Permission.objects.create(codename="edit_returns", label="Edit Returns", category="returns")
         role = Role.objects.create(name="Support")
-        role.permissions.add(perm)
+        role.permissions.add(perm, edit_perm)
         self.user = User.objects.create_user(
             username="support",
             password="Str0ngPassw0rd!",
