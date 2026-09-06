@@ -43,7 +43,9 @@ export async function listRecentSales() {
 export interface SaleItemUpdatePayload {
   id: string;
   stockItem: string;
-  imei: string;
+  // Echoed back from the existing item, never actually changed -- the backend
+  // ignores it on update. Nullable to match SaleItem now that IMEI is optional.
+  imei: string | null;
   sellingPrice: number;
   discount: number;
 }

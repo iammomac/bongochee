@@ -277,7 +277,7 @@ export default function ReturnsPage() {
                 <p className="mt-2 font-semibold">
                   {selected.categoryName} {selected.modelName}
                 </p>
-                <p className="text-xs text-gray-400">IMEI: {selected.imei}</p>
+                <p className="text-xs text-gray-400">IMEI: {selected.imei || "—"}</p>
               </div>
               <div className="rounded-2xl bg-background p-4 dark:bg-gray-950">
                 <p className="text-xs uppercase tracking-[0.2em] text-gray-400">Sale</p>
@@ -397,7 +397,7 @@ export default function ReturnsPage() {
                 <td className="px-4 py-3">
                   {ret.categoryName} {ret.modelName}
                 </td>
-                <td className="px-4 py-3 text-xs text-gray-400">{ret.imei}</td>
+                <td className="px-4 py-3 text-xs text-gray-400">{ret.imei || "—"}</td>
                 <td className="px-4 py-3">{ret.returnCategoryDisplay}</td>
                 <td className="px-4 py-3">{new Date(ret.returnDate).toLocaleDateString()}</td>
                 <td className="px-4 py-3">

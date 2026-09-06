@@ -3,9 +3,14 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import SalesPage from "./SalesPage";
 import * as salesService from "../../services/sales";
+import { usePermissions } from "../../hooks/usePermissions";
 import type { AvailablePhone, Sale } from "../../types";
 
 vi.mock("../../services/sales");
+// SalesPage reads usePermissions() (for the "edit sale" gate) which otherwise
+// needs a real AuthProvider ancestor — mocked directly rather than wrapping
+// every render() call, matching how services/sales is already mocked above.
+vi.mock("../../hooks/usePermissions");
 
 const phone: AvailablePhone = {
   id: "stock-1",
@@ -52,6 +57,7 @@ describe("SalesPage", () => {
     vi.mocked(salesService.listRecentSales).mockResolvedValue([]);
     vi.mocked(salesService.searchAvailableStock).mockResolvedValue([phone]);
     vi.mocked(salesService.createSale).mockResolvedValue(mockSale);
+    vi.mocked(usePermissions).mockReturnValue({ has: () => true, isAdminOrSuper: true });
   });
 
   it("adds a phone at a bargained price with a discount and submits the sale with the net breakdown", async () => {
@@ -124,4 +130,34 @@ describe("SalesPage", () => {
     expect(screen.getByText(/each imei must be exactly 15 digits/i)).toBeInTheDocument();
     expect(screen.queryByText("Samsung Galaxy A56", { selector: "p.text-gray-800" })).not.toBeInTheDocument();
   });
+
+  it("accepts a phone with no IMEI entered", async () => {
+    const user = userEvent.setup();
+    render(<SalesPage />);
+
+    const [customerNameInput] = screen.getAllByRole("textbox");
+    await user.type(customerNameInput, "Amina Yusuf");
+
+    const searchInput = screen.getByPlaceholderText(/search by category or model/i);
+    await user.click(searchInput);
+    await user.type(searchInput, "Galaxy");
+    const resultButton = await screen.findByRole("button", { name: "Samsung Galaxy A56" });
+    await user.click(resultButton);
+
+    await user.click(screen.getByRole("button", { name: /continue/i }));
+    // IMEI field left untouched entirely.
+    await user.click(screen.getByRole("button", { name: /add to sale/i }));
+
+    expect(screen.getByText("Samsung Galaxy A56")).toBeInTheDocument();
+    expect(screen.queryByText(/each imei must be exactly 15 digits/i)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /complete sale/i }));
+
+    await waitFor(() => expect(salesService.createSale).toHaveBeenCalled());
+    expect(salesService.createSale).toHaveBeenCalledWith(
+      expect.objectContaining({
+        items: [expect.objectContaining({ stockItem: "stock-1", imei: "" })],
+      }),
+    );
+  }, 15000);
 });

@@ -103,7 +103,7 @@ export interface SaleItem {
   stockItem: string;
   modelName: string;
   categoryName: string;
-  imei: string;
+  imei: string | null;
   sellingPrice: number;
   discount: number;
 }
@@ -132,7 +132,7 @@ export type ReturnStatus = "pending" | "processing" | "resolved" | "cancelled";
 
 export interface SaleItemLookupResult {
   id: string;
-  imei: string;
+  imei: string | null;
   invoiceNumber: string;
   customerName: string;
   customerPhone: string;
@@ -150,7 +150,7 @@ export interface ReturnPhoto {
 export interface ReturnRecord {
   id: string;
   saleItem: string;
-  imei: string;
+  imei: string | null;
   invoiceNumber: string;
   customerName: string;
   categoryName: string;
@@ -208,7 +208,7 @@ export interface SupplierSummaryRow {
 
 export interface LossReportRow {
   id: string;
-  imei: string;
+  imei: string | null;
   invoiceNumber: string;
   customerName: string;
   categoryName: string;

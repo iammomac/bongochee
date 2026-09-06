@@ -121,7 +121,7 @@ export function SaleReceipt({ sale, onClose }: Props) {
                 <p className="font-medium">
                   {item.categoryName} {item.modelName}
                 </p>
-                <p className="text-xs text-gray-400">IMEI: {item.imei}</p>
+                {item.imei ? <p className="text-xs text-gray-400">IMEI: {item.imei}</p> : null}
                 {item.discount ? (
                   <p className="text-xs text-gray-400">
                     Sold: TZS {currency(item.sellingPrice)} · Discount: TZS {currency(item.discount)}

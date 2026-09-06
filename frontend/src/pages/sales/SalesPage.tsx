@@ -103,11 +103,14 @@ function PhoneEntryPanel({ existingImeis, onAddToCart }: PhoneEntryPanelProps) {
 
   const handleAddToCart = () => {
     if (!phone || !imeis) return;
-    if (imeis.some((imei) => !IMEI_PATTERN.test(imei))) {
-      setError("Each IMEI must be exactly 15 digits");
+    // Blank is fine (IMEI isn't required) -- only reject one that's actually been typed
+    // but doesn't look like a real IMEI.
+    if (imeis.some((imei) => imei.trim() !== "" && !IMEI_PATTERN.test(imei))) {
+      setError("Each IMEI must be exactly 15 digits, or left blank");
       return;
     }
-    const allImeis = [...existingImeis, ...imeis];
+    const nonBlankNew = imeis.filter((imei) => imei.trim() !== "");
+    const allImeis = [...existingImeis.filter((imei) => imei), ...nonBlankNew];
     if (new Set(allImeis).size !== allImeis.length) {
       setError("Duplicate IMEI — check the numbers entered");
       return;
@@ -188,7 +191,7 @@ function PhoneEntryPanel({ existingImeis, onAddToCart }: PhoneEntryPanelProps) {
 
       {phone && imeis ? (
         <div className="space-y-2">
-          <p className="text-xs font-medium text-gray-500">Enter one IMEI per unit</p>
+          <p className="text-xs font-medium text-gray-500">Enter one IMEI per unit (optional)</p>
           {imeis.map((value, i) => (
             <input
               key={i}
@@ -198,7 +201,7 @@ function PhoneEntryPanel({ existingImeis, onAddToCart }: PhoneEntryPanelProps) {
                 next[i] = e.target.value;
                 setImeis(next);
               }}
-              placeholder={`IMEI #${i + 1} (15 digits)`}
+              placeholder={`IMEI #${i + 1} (optional, 15 digits)`}
               className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm outline-none focus:border-primary dark:border-gray-800 dark:bg-gray-950"
             />
           ))}
@@ -351,7 +354,7 @@ function EditSaleModal({ sale, onClose, onSaved }: EditSaleModalProps) {
                 <p className="text-sm font-medium">
                   {item.categoryName} {item.modelName}
                 </p>
-                <p className="mb-2 text-xs text-gray-400">IMEI: {item.imei}</p>
+                <p className="mb-2 text-xs text-gray-400">IMEI: {item.imei || "—"}</p>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="mb-1 block text-xs font-medium text-gray-500">Sold price</label>
@@ -464,7 +467,7 @@ export default function SalesPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold">Point of sale</h1>
-          <p className="text-sm text-gray-400">Fast multi-step sales capture with IMEI verification</p>
+          <p className="text-sm text-gray-400">Fast multi-step sales capture with optional IMEI verification</p>
         </div>
       </div>
 
@@ -533,7 +536,7 @@ export default function SalesPage() {
               <div key={line.id} className="flex items-center justify-between">
                 <div>
                   <p className="text-gray-800 dark:text-gray-200">{line.phone.name}</p>
-                  <p className="text-xs text-gray-400">IMEI: {line.imei}</p>
+                  <p className="text-xs text-gray-400">IMEI: {line.imei || "—"}</p>
                   <p className="text-xs text-gray-400">
                     Sold: TZS {currency(line.soldPrice)}
                     {line.discount ? ` · Discount: TZS ${currency(line.discount)}` : ""}
