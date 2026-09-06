@@ -18,6 +18,15 @@ class CookieJWTAuthentication(JWTAuthentication):
         return self.get_user(validated_token), validated_token
 
     def enforce_csrf(self, request):
+        # /auth/login/ authenticates via the username/password in the request body,
+        # never via request.user from a cookie found here -- a CSRF attacker can't
+        # know the victim's password, so there's nothing this check protects on that
+        # path. Enforcing it there instead creates a lockout: a stale-but-still-valid
+        # access_token cookie from an earlier session (e.g. one issued just before a
+        # cookie-config change) blocks a fresh login attempt with no way to ever
+        # obtain a working csrftoken cookie, since login itself is what's blocked.
+        if request.path.rstrip("/").endswith("/auth/login"):
+            return
         check = CSRFCheck(lambda r: None)
         check.process_request(request)
         reason = check.process_view(request, None, (), {})
