@@ -13,15 +13,21 @@ class SaleItemSerializer(serializers.ModelSerializer):
     # Explicit field, no auto UniqueValidator: this is a nested list serializer with no
     # per-child instance, so DRF can't exclude "this row" from the uniqueness check —
     # editing a sale while echoing back its own unchanged IMEI would otherwise be
-    # rejected as a false duplicate. The model's own unique=True still blocks two
-    # different SaleItems ever sharing an IMEI when new rows are actually created.
-    imei = serializers.CharField(max_length=32)
+    # rejected as a false duplicate. SaleSerializer.create() below does its own
+    # duplicate check instead, since it only ever runs for genuinely new items.
+    imei = serializers.CharField(max_length=32, required=False, allow_null=True, allow_blank=True)
     model_name = serializers.CharField(source="stock_item.model.name", read_only=True)
     category_name = serializers.CharField(source="stock_item.category.name", read_only=True)
 
     class Meta:
         model = SaleItem
         fields = ("id", "stock_item", "model_name", "category_name", "imei", "selling_price", "discount")
+
+    def validate_imei(self, value):
+        # Store "not on hand" as NULL, never "" -- a unique index treats every ""
+        # as the same value (second blank sale would collide) but allows any number
+        # of NULLs.
+        return value or None
 
 
 class SaleSerializer(serializers.ModelSerializer):
@@ -49,6 +55,19 @@ class SaleSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         items_data = validated_data.pop("items", [])
+        # Checked up front, before anything is written: a raw DB-level duplicate
+        # (the model's unique=True) would otherwise surface as an unhandled 500
+        # instead of a clean validation error. Only ever runs for new items --
+        # editing an existing sale goes through update() below, which never
+        # touches imei -- so this can't collide with a sale's own unchanged IMEI.
+        seen_imeis = set()
+        for item_data in items_data:
+            imei = item_data.get("imei")
+            if imei:
+                if imei in seen_imeis or SaleItem.objects.filter(imei=imei).exists():
+                    raise serializers.ValidationError({"detail": f"IMEI {imei} is already recorded against another sale"})
+                seen_imeis.add(imei)
+
         sale = Sale.objects.create(**validated_data, sold_by=self.context["request"].user)
         for item_data in items_data:
             # Re-fetch fresh rather than reuse item_data["stock_item"] (resolved at

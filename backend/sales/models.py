@@ -23,12 +23,16 @@ class Sale(models.Model):
 
 
 class SaleItem(models.Model):
-    """One phone sold. IMEI is required per unit, captured after quantity confirm."""
+    """One phone sold. IMEI is captured per unit after quantity confirm when the
+    seller has it on hand, but isn't required — some phones are sold without one
+    on record."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     sale = models.ForeignKey(Sale, on_delete=models.CASCADE, related_name="items")
     stock_item = models.ForeignKey("stock.StockItem", on_delete=models.PROTECT, related_name="sale_items")
-    imei = models.CharField(max_length=32, unique=True)
+    # null (not "") when absent -- a unique index allows any number of NULLs but only
+    # one of any given non-null value, so multiple IMEI-less sales don't collide.
+    imei = models.CharField(max_length=32, unique=True, null=True, blank=True)
     selling_price = models.DecimalField(max_digits=12, decimal_places=2)  # amount the customer actually paid
     discount = models.DecimalField(max_digits=12, decimal_places=2, default=0)  # informational only
 
