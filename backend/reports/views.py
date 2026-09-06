@@ -9,7 +9,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from accounts.models import User
+from accounts.models import PasswordChangeRequest, User
 from activitylog.services import log_action
 from rbac.permissions import HasPermission, IsAdminOrSuper
 from reports import services
@@ -60,6 +60,8 @@ class DashboardSummaryView(APIView):
             "total_stock_value": StockItem.objects.aggregate(total=Sum("buying_price"))["total"] or 0,
             "low_stock": StockItem.objects.filter(quantity_remaining__lte=LOW_STOCK_THRESHOLD).count(),
             "out_of_stock": StockItem.objects.filter(quantity_remaining=0).count(),
+            "pending_returns": Return.objects.filter(status__in=["pending", "processing"]).count(),
+            "pending_password_requests": PasswordChangeRequest.objects.filter(status="pending").count(),
             "revenue_trend": _revenue_trend(today),
         }
         serializer = DashboardSummarySerializer(summary)

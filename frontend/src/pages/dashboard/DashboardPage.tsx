@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
   Area,
@@ -11,8 +12,11 @@ import {
   YAxis,
 } from "recharts";
 import {
+  AlertTriangle,
   ArrowDownRight,
   ArrowUpRight,
+  CheckCircle2,
+  KeyRound,
   Package,
   RotateCcw,
   ShoppingCart,
@@ -20,6 +24,7 @@ import {
 } from "lucide-react";
 import { getDashboardSummary } from "../../services/dashboard";
 import type { DashboardSummary, RevenueTrendPoint } from "../../services/dashboard";
+import { usePermissions } from "../../hooks/usePermissions";
 
 const currency = (value: number) =>
   new Intl.NumberFormat("en-TZ", { maximumFractionDigits: 0 }).format(value);
@@ -146,9 +151,67 @@ const cards: Array<{
   { key: "remainingStock", label: "Remaining Stock", icon: Package },
 ];
 
+interface PriorityItem {
+  key: string;
+  message: string;
+  link: string;
+  icon: typeof AlertTriangle;
+  tone: "danger" | "warning" | "primary";
+}
+
+function buildPriorityItems(summary: DashboardSummary | null, canManageUsers: boolean): PriorityItem[] {
+  if (!summary) return [];
+  const items: PriorityItem[] = [];
+  if (summary.outOfStock > 0) {
+    items.push({
+      key: "out-of-stock",
+      message: `${summary.outOfStock} phone model${summary.outOfStock === 1 ? "" : "s"} out of stock`,
+      link: "/stock",
+      icon: AlertTriangle,
+      tone: "danger",
+    });
+  }
+  if (summary.lowStock > 0) {
+    items.push({
+      key: "low-stock",
+      message: `${summary.lowStock} phone model${summary.lowStock === 1 ? "" : "s"} low on stock`,
+      link: "/stock",
+      icon: Package,
+      tone: "warning",
+    });
+  }
+  if (summary.pendingReturns > 0) {
+    items.push({
+      key: "pending-returns",
+      message: `${summary.pendingReturns} return${summary.pendingReturns === 1 ? "" : "s"} awaiting review`,
+      link: "/returns",
+      icon: RotateCcw,
+      tone: "warning",
+    });
+  }
+  if (canManageUsers && summary.pendingPasswordRequests > 0) {
+    items.push({
+      key: "pending-password-requests",
+      message: `${summary.pendingPasswordRequests} password reset request${summary.pendingPasswordRequests === 1 ? "" : "s"} pending`,
+      link: "/users",
+      icon: KeyRound,
+      tone: "primary",
+    });
+  }
+  return items;
+}
+
+const TONE_STYLES: Record<PriorityItem["tone"], string> = {
+  danger: "border-danger/20 bg-danger/5 text-danger",
+  warning: "border-warning/20 bg-warning/5 text-warning",
+  primary: "border-primary/20 bg-primary/5 text-primary",
+};
+
 export default function DashboardPage() {
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const { has } = usePermissions();
+  const navigate = useNavigate();
 
   useEffect(() => {
     void getDashboardSummary()
@@ -163,6 +226,7 @@ export default function DashboardPage() {
     today && yesterday && yesterday.revenue > 0
       ? ((today.revenue - yesterday.revenue) / yesterday.revenue) * 100
       : null;
+  const priorityItems = buildPriorityItems(summary, has("manage_users"));
 
   return (
     <div className="space-y-6">
@@ -235,17 +299,29 @@ export default function DashboardPage() {
         </div>
         <div className="card p-6">
           <h2 className="text-lg font-semibold">Priority items</h2>
-          <ul className="mt-4 space-y-3 text-sm text-gray-500">
-            <li className="rounded-2xl border border-dashed border-gray-200 p-3">
-              Low-stock phones require replenishment
-            </li>
-            <li className="rounded-2xl border border-dashed border-gray-200 p-3">
-              2 returns awaiting review
-            </li>
-            <li className="rounded-2xl border border-dashed border-gray-200 p-3">
-              The admin approval queue is active
-            </li>
-          </ul>
+          {summary === null ? (
+            <p className="mt-4 text-sm text-gray-400">Loading…</p>
+          ) : priorityItems.length === 0 ? (
+            <div className="mt-4 flex items-center gap-2 rounded-2xl border border-dashed border-gray-200 p-3 text-sm text-gray-500 dark:border-gray-800">
+              <CheckCircle2 size={16} className="shrink-0 text-success" />
+              All caught up — nothing needs attention right now.
+            </div>
+          ) : (
+            <ul className="mt-4 space-y-3 text-sm">
+              {priorityItems.map(({ key, message, link, icon: Icon, tone }) => (
+                <li key={key}>
+                  <button
+                    type="button"
+                    onClick={() => navigate(link)}
+                    className={`flex w-full items-center gap-2 rounded-2xl border p-3 text-left transition hover:opacity-80 ${TONE_STYLES[tone]}`}
+                  >
+                    <Icon size={16} className="shrink-0" />
+                    {message}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       </div>
     </div>

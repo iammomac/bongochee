@@ -5,7 +5,7 @@ import openpyxl
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from accounts.models import User
+from accounts.models import PasswordChangeRequest, User
 from catalog.models import Category, PhoneModel
 from rbac.models import Permission, Role
 from returns_app.models import Return
@@ -75,6 +75,25 @@ class DashboardSummaryTests(APITestCase):
         )
         res = self.client.get("/api/v1/reports/dashboard-summary/")
         self.assertEqual(res.json()["todaysReturns"], 1)
+
+    def test_pending_returns_counts_pending_and_processing_only(self):
+        resolved = Return.objects.create(
+            sale_item=self.sale_item, return_date=date.today(), return_category="battery",
+            status="resolved", processed_by=self.user,
+        )
+        Return.objects.create(
+            sale_item=self.sale_item, return_date=date.today(), return_category="camera",
+            status="pending", processed_by=self.user,
+        )
+        res = self.client.get("/api/v1/reports/dashboard-summary/")
+        self.assertEqual(res.json()["pendingReturns"], 1)
+        resolved.delete()
+
+    def test_pending_password_requests_counts_pending_only(self):
+        PasswordChangeRequest.objects.create(user=self.user, status="pending")
+        PasswordChangeRequest.objects.create(user=self.user, status="approved")
+        res = self.client.get("/api/v1/reports/dashboard-summary/")
+        self.assertEqual(res.json()["pendingPasswordRequests"], 1)
 
 
 class ReportEndpointsTests(APITestCase):

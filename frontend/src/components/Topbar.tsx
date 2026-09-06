@@ -235,7 +235,10 @@ export function Topbar({ onMenuClick }: TopbarProps) {
         </button>
         <div className="rounded-2xl bg-white px-4 py-2 shadow-neu dark:bg-gray-900 dark:shadow-neu-dark">
           <p className="text-sm font-medium text-gray-700 dark:text-gray-200">
-            {greetingFor(now.getHours())}, {user?.fullName ?? "—"}
+            {/* fullName is "" (not null) for accounts with no first/last name set,
+                e.g. the seeded super/admin accounts -- "??" only falls back on
+                null/undefined, so username is the real fallback here. */}
+            {greetingFor(now.getHours())}, {user?.fullName || user?.username || "—"}
           </p>
           <p className="text-xs text-gray-400">
             {time} &middot; {date}

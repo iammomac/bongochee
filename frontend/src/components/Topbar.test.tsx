@@ -25,10 +25,10 @@ const user: User = {
   mustChangePassword: false,
 };
 
-function renderTopbar() {
+function renderTopbar(overrideUser: User = user) {
   return render(
     <AuthContext.Provider
-      value={{ user, isLoading: false, login: vi.fn(), logout: vi.fn(), changePassword: vi.fn() }}
+      value={{ user: overrideUser, isLoading: false, login: vi.fn(), logout: vi.fn(), changePassword: vi.fn() }}
     >
       <MemoryRouter>
         <Topbar onMenuClick={vi.fn()} />
@@ -68,6 +68,15 @@ describe("Topbar", () => {
     vi.setSystemTime(new Date(2026, 0, 1, 19, 0));
     renderTopbar();
     expect(screen.getByText("Good evening, J Doe")).toBeInTheDocument();
+  });
+
+  it("falls back to the username when the account has no first/last name set", async () => {
+    // e.g. the seeded "super"/"admin" accounts -- fullName is "" (not null), so a
+    // plain ?? fallback would render "Good evening, " with nothing after it.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 0, 1, 19, 0));
+    renderTopbar({ ...user, firstName: "", lastName: "", fullName: "", username: "super" });
+    expect(screen.getByText("Good evening, super")).toBeInTheDocument();
   });
 
   it("renders the 24-hour time and DD/MM/YY date", () => {

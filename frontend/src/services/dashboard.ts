@@ -14,6 +14,8 @@ export interface DashboardSummary {
   totalStockValue: number;
   lowStock: number;
   outOfStock: number;
+  pendingReturns: number;
+  pendingPasswordRequests: number;
   revenueTrend: RevenueTrendPoint[];
 }
 
