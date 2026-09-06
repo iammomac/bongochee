@@ -139,7 +139,13 @@ class UserCreateSerializer(serializers.ModelSerializer):
         user = super().update(instance, validated_data)
         if password:
             user.set_password(password)
-            user.must_change_password = False
+            # Forced True (not False): whoever is doing this reset only ever hands
+            # over a temporary value -- the account holder must immediately choose
+            # their own real password nobody else, including the admin who reset
+            # it, ever knows. Matters most for the "super admin locked themselves
+            # out" recovery case (see UserViewSet.perform_update), but is the right
+            # behavior for any admin-driven reset.
+            user.must_change_password = True
             user.save(update_fields=["password", "must_change_password"])
         return user
 

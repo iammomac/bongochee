@@ -262,6 +262,32 @@ class UserViewSetAdminTierTests(APITestCase):
         )
         self.assertEqual(res.status_code, status.HTTP_200_OK)
 
+    def test_system_admin_can_reset_superuser_password_only(self):
+        # The one deliberate exception to "only a super admin can modify this
+        # account": a non-superuser admin may reset its password (and nothing
+        # else) so a locked-out super admin can be helped back in.
+        self.client.force_authenticate(self.system_admin)
+        res = self.client.patch(
+            f"/api/v1/auth/users/{self.super_admin.id}/", {"password": "BrandNewStr0ngPass!"}, format="json"
+        )
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.super_admin.refresh_from_db()
+        self.assertTrue(self.super_admin.check_password("BrandNewStr0ngPass!"))
+        # Forced True: the admin who reset it never gets to know/control the
+        # account's real password going forward.
+        self.assertTrue(self.super_admin.must_change_password)
+
+    def test_system_admin_cannot_smuggle_other_changes_alongside_password_reset(self):
+        self.client.force_authenticate(self.system_admin)
+        res = self.client.patch(
+            f"/api/v1/auth/users/{self.super_admin.id}/",
+            {"password": "BrandNewStr0ngPass!", "firstName": "Hacked"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN)
+        self.super_admin.refresh_from_db()
+        self.assertTrue(self.super_admin.check_password("Str0ngPassw0rd!"))  # unchanged
+
     def test_delete_is_disabled(self):
         self.client.force_authenticate(self.super_admin)
         res = self.client.delete(f"/api/v1/auth/users/{self.regular_user.id}/")

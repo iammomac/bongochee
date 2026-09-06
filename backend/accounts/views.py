@@ -163,9 +163,25 @@ class UserViewSet(viewsets.ModelViewSet):
         serializer.save()
         log_action(user=self.request.user, action="user.create", request=self.request, username=serializer.instance.username)
 
+    # Fields a non-superuser admin is allowed to touch on a superuser's own account --
+    # nothing here grants any actual privilege, it's purely so a locked-out super
+    # admin can be helped back in without another admin gaining any real control
+    # over that account (can't demote it, deactivate it, reassign its role, etc.).
+    SUPERUSER_PROTECTED_FIELDS = (
+        "username", "first_name", "last_name", "email", "phone", "role", "is_active", "is_active_employee",
+    )
+
     def perform_update(self, serializer):
         if serializer.instance.is_superuser and not self.request.user.is_superuser:
-            raise PermissionDenied("Only a super admin can modify this account.")
+            changed = [
+                field
+                for field in self.SUPERUSER_PROTECTED_FIELDS
+                if field in serializer.validated_data and serializer.validated_data[field] != getattr(serializer.instance, field)
+            ]
+            if changed:
+                raise PermissionDenied(
+                    "Only a super admin can modify this account -- a non-superuser admin may only reset its password."
+                )
         serializer.save()
         log_action(user=self.request.user, action="user.update", request=self.request, username=serializer.instance.username)
 
