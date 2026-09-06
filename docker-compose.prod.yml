@@ -6,13 +6,13 @@
 # renewal loop. See docs/DEPLOYMENT.md for first-boot cert bootstrapping.
 services:
   db:
-    ports: []
+    ports: !reset []
 
   backend:
-    ports: []
+    ports: !reset []
 
   frontend:
-    ports: []
+    ports: !reset []
 
   nginx:
     image: nginx:alpine
