@@ -62,3 +62,7 @@ export async function updateSale(id: string, payload: SaleUpdatePayload) {
   const { data } = await api.patch<Sale>(`/sales/sales/${id}/`, payload);
   return data;
 }
+
+export async function deleteSale(id: string) {
+  await api.delete(`/sales/sales/${id}/`);
+}

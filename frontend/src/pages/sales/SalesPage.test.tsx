@@ -194,4 +194,48 @@ describe("SalesPage", () => {
       }),
     );
   }, 15000);
+
+  describe("undoing a recorded sale", () => {
+    beforeEach(() => {
+      vi.mocked(salesService.listRecentSales).mockResolvedValue([mockSale]);
+    });
+
+    it("hides the undo action without delete_sales permission", async () => {
+      vi.mocked(usePermissions).mockReturnValue({ has: () => false, isAdminOrSuper: false });
+      render(<SalesPage />);
+      await screen.findByText("INV-1");
+      expect(screen.queryByRole("button", { name: /undo/i })).not.toBeInTheDocument();
+    });
+
+    it("undoes a sale after confirming, and refreshes the list", async () => {
+      vi.mocked(salesService.listRecentSales)
+        .mockResolvedValueOnce([mockSale])
+        .mockResolvedValueOnce([]);
+      vi.mocked(salesService.deleteSale).mockResolvedValue(undefined);
+      const user = userEvent.setup();
+      render(<SalesPage />);
+
+      await user.click(await screen.findByRole("button", { name: /undo/i }));
+      expect(screen.getByText(/undo this sale/i)).toBeInTheDocument();
+
+      await user.click(screen.getByRole("button", { name: /confirm/i }));
+
+      await waitFor(() => expect(salesService.deleteSale).toHaveBeenCalledWith("sale-1"));
+      await waitFor(() => expect(salesService.listRecentSales).toHaveBeenCalledTimes(2));
+    });
+
+    it("shows the server's error when undoing a sale is rejected", async () => {
+      vi.mocked(salesService.deleteSale).mockRejectedValue({
+        isAxiosError: true,
+        response: { data: { detail: "Unable to undo this sale" } },
+      });
+      const user = userEvent.setup();
+      render(<SalesPage />);
+
+      await user.click(await screen.findByRole("button", { name: /undo/i }));
+      await user.click(screen.getByRole("button", { name: /confirm/i }));
+
+      expect(await screen.findByText(/unable to undo this sale/i)).toBeInTheDocument();
+    });
+  });
 });

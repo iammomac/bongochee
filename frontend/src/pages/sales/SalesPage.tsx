@@ -6,7 +6,7 @@ import { Pencil, PlusCircle, Receipt as ReceiptIcon, Trash2, X } from "lucide-re
 import { SearchCreateCombobox } from "../../components/SearchCreateCombobox";
 import { SaleReceipt } from "../../components/SaleReceipt";
 import { Select } from "../../components/Select";
-import { searchAvailableStock, createSale, listRecentSales, updateSale } from "../../services/sales";
+import { searchAvailableStock, createSale, listRecentSales, updateSale, deleteSale } from "../../services/sales";
 import { extractErrorMessage } from "../../lib/errors";
 import { openWhatsAppReceipt } from "../../lib/whatsapp";
 import { usePermissions } from "../../hooks/usePermissions";
@@ -410,7 +410,10 @@ export default function SalesPage() {
   const [recentSales, setRecentSales] = useState<Sale[]>([]);
   const [receiptSale, setReceiptSale] = useState<Sale | null>(null);
   const [editingSale, setEditingSale] = useState<Sale | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const canEdit = has("edit_sales");
+  const canDelete = has("delete_sales");
 
   const {
     register,
@@ -432,6 +435,20 @@ export default function SalesPage() {
   useEffect(() => {
     loadRecentSales();
   }, []);
+
+  const handleDeleteSale = async (id: string) => {
+    setServerError(null);
+    setDeletingId(id);
+    try {
+      await deleteSale(id);
+      setConfirmDeleteId(null);
+      loadRecentSales();
+    } catch (err) {
+      setServerError(extractErrorMessage(err, "Unable to undo this sale"));
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   const total = cart.reduce((sum, line) => sum + netPrice(line), 0);
 
@@ -603,26 +620,57 @@ export default function SalesPage() {
                   <td className="px-4 py-3 capitalize">{sale.paymentMethod.replace("_", " ")}</td>
                   <td className="px-4 py-3">TZS {currency(saleTotal)}</td>
                   <td className="px-4 py-3">
-                    <div className="flex items-center gap-3">
-                      <button
-                        type="button"
-                        onClick={() => setReceiptSale(sale)}
-                        className="flex items-center gap-1 text-xs font-medium text-primary hover:underline"
-                      >
-                        <ReceiptIcon size={14} />
-                        View receipt
-                      </button>
-                      {canEdit ? (
+                    {confirmDeleteId === sale.id ? (
+                      <div className="flex items-center justify-end gap-2">
+                        <span className="text-xs text-gray-400">Undo this sale?</span>
                         <button
                           type="button"
-                          onClick={() => setEditingSale(sale)}
-                          className="flex items-center gap-1 text-xs font-medium text-gray-500 hover:underline dark:text-gray-400"
+                          onClick={() => void handleDeleteSale(sale.id)}
+                          disabled={deletingId === sale.id}
+                          className="text-xs font-medium text-danger hover:underline disabled:opacity-50"
                         >
-                          <Pencil size={14} />
-                          Edit
+                          {deletingId === sale.id ? "Undoing…" : "Confirm"}
                         </button>
-                      ) : null}
-                    </div>
+                        <button
+                          type="button"
+                          onClick={() => setConfirmDeleteId(null)}
+                          className="text-xs font-medium text-gray-400 hover:underline"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-3">
+                        <button
+                          type="button"
+                          onClick={() => setReceiptSale(sale)}
+                          className="flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+                        >
+                          <ReceiptIcon size={14} />
+                          View receipt
+                        </button>
+                        {canEdit ? (
+                          <button
+                            type="button"
+                            onClick={() => setEditingSale(sale)}
+                            className="flex items-center gap-1 text-xs font-medium text-gray-500 hover:underline dark:text-gray-400"
+                          >
+                            <Pencil size={14} />
+                            Edit
+                          </button>
+                        ) : null}
+                        {canDelete ? (
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeleteId(sale.id)}
+                            className="flex items-center gap-1 text-xs font-medium text-gray-500 hover:underline dark:text-gray-400"
+                          >
+                            <Trash2 size={14} />
+                            Undo
+                          </button>
+                        ) : null}
+                      </div>
+                    )}
                   </td>
                 </tr>
               );

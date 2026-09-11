@@ -32,3 +32,18 @@ class SaleViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         sale = serializer.save()
         log_action(user=self.request.user, action="sale.create", request=self.request, invoice=sale.invoice_number)
+
+    def perform_update(self, serializer):
+        sale = serializer.save()
+        log_action(user=self.request.user, action="sale.update", request=self.request, invoice=sale.invoice_number)
+
+    def perform_destroy(self, instance):
+        # Undoing a mistaken sale must put the phone(s) back into available stock --
+        # the create path decrements quantity_remaining by one per item, so deleting
+        # has to reverse that or the stock count stays permanently wrong.
+        for item in instance.items.select_related("stock_item"):
+            stock_item = item.stock_item
+            stock_item.quantity_remaining += 1
+            stock_item.save(update_fields=["quantity_remaining"])
+        log_action(user=self.request.user, action="sale.delete", request=self.request, invoice=instance.invoice_number)
+        instance.delete()

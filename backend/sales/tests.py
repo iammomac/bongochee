@@ -185,3 +185,25 @@ class SaleTests(APITestCase):
         self.client.force_authenticate(self.supervisor)
         res = self.client.delete(f"/api/v1/sales/sales/{sale.id}/")
         self.assertEqual(res.status_code, status.HTTP_204_NO_CONTENT)
+
+    def test_deleting_a_sale_restores_the_stock_it_took(self):
+        # Undoing a mistaken sale must put the phone back into available stock --
+        # otherwise the deleted sale still leaves the batch permanently short.
+        res = self.client.post(
+            "/api/v1/sales/sales/",
+            self._sale_payload(
+                [{"stockItem": str(self.stock_item.id), "imei": "111111111111111", "sellingPrice": "650000"}]
+            ),
+            format="json",
+        )
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+        self.stock_item.refresh_from_db()
+        self.assertEqual(self.stock_item.quantity_remaining, 1)
+
+        self.client.force_authenticate(self.supervisor)
+        res = self.client.delete(f"/api/v1/sales/sales/{res.data['id']}/")
+        self.assertEqual(res.status_code, status.HTTP_204_NO_CONTENT)
+
+        self.stock_item.refresh_from_db()
+        self.assertEqual(self.stock_item.quantity_remaining, 2)
+        self.assertFalse(SaleItem.objects.filter(imei="111111111111111").exists())
