@@ -1,11 +1,13 @@
 from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 from django.contrib.auth.models import AnonymousUser
 from django.core.cache import cache
-from django.test import RequestFactory, SimpleTestCase
+from django.test import RequestFactory, SimpleTestCase, override_settings
 from rest_framework import status
 from rest_framework.test import APITestCase
 
+from accounts.captcha import verify_turnstile
 from accounts.models import PasswordChangeRequest, User
 from accounts.throttles import LoginRateThrottle
 from rbac.models import Role
@@ -44,6 +46,30 @@ class HasPermissionTests(SimpleTestCase):
         self.assertFalse(HasPermission().has_permission(request, view))
 
 
+class VerifyTurnstileTests(SimpleTestCase):
+    @override_settings(TURNSTILE_SECRET_KEY="")
+    def test_no_op_until_a_secret_key_is_configured(self):
+        self.assertTrue(verify_turnstile(None, "1.2.3.4"))
+
+    @override_settings(TURNSTILE_SECRET_KEY="test-secret")
+    def test_rejects_a_missing_token_once_configured(self):
+        self.assertFalse(verify_turnstile(None, "1.2.3.4"))
+
+    @override_settings(TURNSTILE_SECRET_KEY="test-secret")
+    def test_a_network_failure_fails_closed_instead_of_500ing(self):
+        with patch("accounts.captcha.urllib.request.urlopen", side_effect=OSError("timed out")):
+            self.assertFalse(verify_turnstile("some-token", "1.2.3.4"))
+
+    @override_settings(TURNSTILE_SECRET_KEY="test-secret")
+    def test_reads_cloudflares_success_field(self):
+        response = MagicMock()
+        response.read.return_value = b'{"success": true}'
+        response.__enter__.return_value = response
+        with patch("accounts.captcha.urllib.request.urlopen", return_value=response):
+            self.assertTrue(verify_turnstile("some-token", "1.2.3.4"))
+
+
+@override_settings(TURNSTILE_SECRET_KEY="")
 class AuthFlowTests(APITestCase):
     def setUp(self):
         cache.clear()  # login is IP-throttled — start each test with a clean bucket
@@ -65,6 +91,30 @@ class AuthFlowTests(APITestCase):
         self.assertEqual(me.status_code, status.HTTP_200_OK)
         self.assertEqual(me.json()["username"], "jdoe")
         self.assertEqual(me.json()["role"]["name"], "Staff")
+
+    @override_settings(TURNSTILE_SECRET_KEY="test-secret")
+    def test_login_rejects_missing_captcha_once_turnstile_is_configured(self):
+        res = self.client.post("/api/v1/auth/login/", {"username": "jdoe", "password": "Str0ngPassw0rd!"})
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+
+    @override_settings(TURNSTILE_SECRET_KEY="test-secret")
+    def test_login_accepts_a_captcha_token_cloudflare_verifies(self):
+        with patch("accounts.serializers.verify_turnstile", return_value=True) as mocked:
+            res = self.client.post(
+                "/api/v1/auth/login/",
+                {"username": "jdoe", "password": "Str0ngPassw0rd!", "captchaToken": "a-real-looking-token"},
+            )
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        mocked.assert_called_once()
+
+    @override_settings(TURNSTILE_SECRET_KEY="test-secret")
+    def test_login_rejects_a_captcha_token_cloudflare_does_not_verify(self):
+        with patch("accounts.serializers.verify_turnstile", return_value=False):
+            res = self.client.post(
+                "/api/v1/auth/login/",
+                {"username": "jdoe", "password": "Str0ngPassw0rd!", "captchaToken": "a-forged-token"},
+            )
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_failed_logins_lock_account_after_threshold(self):
         for _ in range(5):

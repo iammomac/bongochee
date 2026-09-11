@@ -1,6 +1,7 @@
 from datetime import date
 
 from django.core.cache import cache
+from django.test import override_settings
 from rest_framework import status
 from rest_framework.test import APITestCase
 
@@ -119,6 +120,7 @@ class SaleStockNotificationTests(APITestCase):
         self.assertEqual(Notification.objects.filter(notification_type="low_stock").count(), 0)
 
 
+@override_settings(TURNSTILE_SECRET_KEY="")
 class EventNotificationTests(APITestCase):
     def setUp(self):
         cache.clear()  # login is IP-throttled — start with a clean bucket
