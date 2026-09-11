@@ -41,6 +41,7 @@ INSTALLED_APPS = [
     "catalog",
     "stock",
     "sales",
+    "loans",
     "returns_app",
     "suppliers",
     "reports",

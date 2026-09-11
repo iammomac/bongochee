@@ -126,6 +126,47 @@ export interface AvailablePhone extends StockItem {
   name: string;
 }
 
+export type LoanStatus = "open" | "partial" | "paid";
+
+export interface LoanSaleItem {
+  id: string;
+  stockItem: string;
+  modelName: string;
+  categoryName: string;
+  imei: string | null;
+  sellingPrice: number;
+  discount: number;
+}
+
+export interface LoanPayment {
+  id: string;
+  amount: number;
+  paymentMethod: PaymentMethod;
+  paidDate: string;
+  notes: string;
+  recordedBy: string;
+  recordedByName: string;
+  createdAt: string;
+}
+
+export interface LoanSale {
+  id: string;
+  invoiceNumber: string;
+  businessName: string;
+  contactPerson: string;
+  contactPhone: string;
+  notes: string;
+  items: LoanSaleItem[];
+  payments: LoanPayment[];
+  soldBy: string;
+  soldByName: string;
+  totalOwed: number;
+  totalPaid: number;
+  balance: number;
+  loanStatus: LoanStatus;
+  createdAt: string;
+}
+
 export type ReturnCategory =
   | "display" | "battery" | "charging" | "camera" | "speaker" | "software" | "network" | "other";
 
@@ -240,6 +281,7 @@ export interface ActivityLogEntry {
 export type PermissionCode =
   | "view_dashboard" | "add_stock" | "edit_stock" | "delete_stock"
   | "create_sales" | "edit_sales" | "delete_sales" | "create_returns" | "edit_returns"
+  | "create_loan_sales" | "edit_loan_sales" | "delete_loan_sales" | "record_loan_payments"
   | "view_reports" | "export_reports"
   | "manage_users" | "manage_roles" | "manage_suppliers"
   | "view_profit" | "view_logs";

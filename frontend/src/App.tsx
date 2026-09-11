@@ -9,6 +9,7 @@ import DashboardPage from "./pages/dashboard/DashboardPage";
 import CategoriesPage from "./pages/catalog/CategoriesPage";
 import StockPage from "./pages/stock/StockPage";
 import SalesPage from "./pages/sales/SalesPage";
+import LoanSalesPage from "./pages/loans/LoanSalesPage";
 import ReturnsPage from "./pages/returns/ReturnsPage";
 import ReportsPage from "./pages/reports/ReportsPage";
 import UsersPage from "./pages/users/UsersPage";
@@ -41,6 +42,15 @@ export default function App() {
                 </Route>
                 <Route element={<ProtectedRoute requires="create_sales" />}>
                   <Route path="/sales" element={<SalesPage />} />
+                </Route>
+                <Route
+                  element={
+                    <ProtectedRoute
+                      requires={["create_loan_sales", "edit_loan_sales", "delete_loan_sales", "record_loan_payments"]}
+                    />
+                  }
+                >
+                  <Route path="/loans" element={<LoanSalesPage />} />
                 </Route>
                 <Route element={<ProtectedRoute requires="create_returns" />}>
                   <Route path="/returns" element={<ReturnsPage />} />

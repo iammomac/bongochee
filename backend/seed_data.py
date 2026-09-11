@@ -31,6 +31,10 @@ permission_codes = [
     ("delete_sales", "Delete Sales", "sales"),
     ("create_returns", "Create Returns", "returns"),
     ("edit_returns", "Edit Returns", "returns"),
+    ("create_loan_sales", "Create Loan Sales", "loans"),
+    ("edit_loan_sales", "Edit Loan Sales", "loans"),
+    ("delete_loan_sales", "Delete Loan Sales", "loans"),
+    ("record_loan_payments", "Record Loan Payments", "loans"),
     ("view_reports", "View Reports", "reports"),
     ("export_reports", "Export Reports", "reports"),
     ("manage_users", "Manage Users", "admin"),
@@ -47,7 +51,13 @@ admin_role, _ = Role.objects.get_or_create(name="Admin", defaults={"description"
 admin_role.permissions.set(Permission.objects.all())
 
 manager_role, _ = Role.objects.get_or_create(name="Manager", defaults={"description": "Operations manager"})
-manager_role.permissions.add(*Permission.objects.exclude(codename__in=["manage_roles", "manage_users", "view_logs"]))
+# Loan sales are held back from this default grant -- unlike everything else here,
+# that's admin/super-only until the business owner deliberately hands it to someone
+# else via the Roles page.
+manager_role.permissions.add(*Permission.objects.exclude(codename__in=[
+    "manage_roles", "manage_users", "view_logs",
+    "create_loan_sales", "edit_loan_sales", "delete_loan_sales", "record_loan_payments",
+]))
 
 # Two-tier admin: "super" is the one true Django superuser — it must always be able
 # to log in with this exact credential, so the password is force-set every run
