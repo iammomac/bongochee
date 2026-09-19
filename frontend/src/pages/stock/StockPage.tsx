@@ -14,6 +14,7 @@ import {
   listRecentStockItems,
   updateStockItem,
 } from "../../services/stock";
+import { todayIso } from "../../lib/dates";
 import { extractErrorMessage } from "../../lib/errors";
 import { usePermissions } from "../../hooks/usePermissions";
 import type { Category, PhoneModel, StockItem, Supplier } from "../../types";
@@ -403,7 +404,7 @@ export default function StockPage() {
     defaultValues: {
       supplierId: "",
       supplierName: "",
-      importDate: new Date().toISOString().slice(0, 10),
+      importDate: todayIso(),
       invoiceNumber: "",
       notes: "",
       rows: [blankRow],
@@ -505,7 +506,7 @@ export default function StockPage() {
       reset({
         supplierId: "",
         supplierName: "",
-        importDate: new Date().toISOString().slice(0, 10),
+        importDate: todayIso(),
         invoiceNumber: "",
         notes: "",
         rows: [blankRow],

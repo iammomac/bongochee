@@ -1,6 +1,7 @@
 from django.core.exceptions import ValidationError
 from django.core.validators import FileExtensionValidator
-from django.db.models import Q
+from django.db.models import Q, Value
+from django.db.models.functions import Concat, Lower, Replace
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.parsers import MultiPartParser
@@ -16,12 +17,20 @@ from returns_app.models import Return, ReturnPhoto
 from returns_app.serializers import ReturnPhotoSerializer, ReturnSerializer, SaleItemLookupSerializer
 from sales.models import SaleItem
 
-LOOKUP_RESULT_LIMIT = 10
+# A popular model can have dozens of sales, and the person picks the customer from the list.
+LOOKUP_RESULT_LIMIT = 30
+
+
+def _squash(text):
+    """Lower-case with spaces and dashes dropped, so "s23u" and "S23 Ultra" compare equal."""
+    return text.lower().replace(" ", "").replace("-", "")
 
 
 class SaleItemLookupView(APIView):
-    """Search a sold phone by IMEI, invoice number, or customer name — the entry
-    point for filing a return, per the spec's 'search then auto-load' flow."""
+    """Search a sold phone by IMEI, invoice number, customer (name or phone), or the phone's
+    brand/model — the entry point for filing a return, per the spec's 'search then auto-load'
+    flow. Typing a model ("s23 ultra") lists every one sold, so the customer can be picked
+    from the list."""
 
     permission_classes = [IsAuthenticated, HasPermission]
     required_permission = "create_returns"
@@ -30,12 +39,33 @@ class SaleItemLookupView(APIView):
         query = request.query_params.get("q", "").strip()
         if not query:
             return Response([])
-        matches = (
-            SaleItem.objects.filter(
-                Q(imei__icontains=query)
-                | Q(sale__invoice_number__icontains=query)
-                | Q(sale__customer_name__icontains=query)
+
+        # Every word must match somewhere ("s23 juma" = an S23 sold to a Juma) ...
+        by_words = Q()
+        for word in query.split():
+            by_words &= (
+                Q(imei__icontains=word)
+                | Q(sale__invoice_number__icontains=word)
+                | Q(sale__customer_name__icontains=word)
+                | Q(sale__customer_phone__icontains=word)
+                | Q(stock_item__category__name__icontains=word)
+                | Q(stock_item__model__name__icontains=word)
             )
+        # ... or the whole query, spacing aside, is part of "<brand> <model>" ("s23u", "samsungs23").
+        squashed = _squash(query)
+        by_name = Q(name_key__contains=squashed) if squashed else Q()
+
+        matches = (
+            SaleItem.objects.annotate(
+                name_key=Lower(
+                    Replace(
+                        Replace(Concat("stock_item__category__name", "stock_item__model__name"), Value(" "), Value("")),
+                        Value("-"),
+                        Value(""),
+                    )
+                )
+            )
+            .filter(by_words | by_name)
             .select_related("sale__sold_by", "stock_item__category", "stock_item__model")
             .order_by("-sale__created_at")[:LOOKUP_RESULT_LIMIT]
         )

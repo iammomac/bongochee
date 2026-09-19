@@ -79,6 +79,76 @@ class ReturnsTests(APITestCase):
         res = self.client.get("/api/v1/returns/lookup/", {"q": "Amina"})
         self.assertEqual(len(res.json()), 1)
 
+    def _sell(self, model_name, customer, invoice, brand="Samsung", phone="255711000000"):
+        category, _ = Category.objects.get_or_create(name=brand)
+        model, _ = PhoneModel.objects.get_or_create(category=category, name=model_name)
+        stock_in = StockIn.objects.create(
+            supplier=Supplier.objects.get(name="Blue Telecom"), import_date=date.today(), created_by=self.user
+        )
+        stock_item = StockItem.objects.create(
+            stock_in=stock_in,
+            category=category,
+            model=model,
+            quantity=5,
+            quantity_remaining=4,
+            buying_price="900000",
+            min_selling_price="1000000",
+            max_selling_price="1200000",
+        )
+        sale = Sale.objects.create(
+            invoice_number=invoice, customer_name=customer, customer_phone=phone, payment_method="cash", sold_by=self.user
+        )
+        return SaleItem.objects.create(sale=sale, stock_item=stock_item, imei=f"IMEI-{invoice}", selling_price="1100000")
+
+    def _customers(self, query):
+        res = self.client.get("/api/v1/returns/lookup/", {"q": query})
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        return sorted(row["customerName"] for row in res.json())
+
+    def test_lookup_by_model_lists_every_customer_who_bought_it(self):
+        self._sell("Galaxy S23 Ultra", "Juma Ali", "INV-S1")
+        self._sell("Galaxy S23 Ultra", "Neema Said", "INV-S2")
+        self._sell("Galaxy S23", "Zawadi Omar", "INV-S3")
+
+        self.assertEqual(self._customers("S23 Ultra"), ["Juma Ali", "Neema Said"])
+        # The plain S23 is a substring of both models, so all three sales appear.
+        self.assertEqual(self._customers("S23"), ["Juma Ali", "Neema Said", "Zawadi Omar"])
+
+    def test_lookup_model_ignores_spacing_and_case(self):
+        self._sell("Galaxy S23 Ultra", "Juma Ali", "INV-S1")
+        self._sell("Galaxy S23", "Zawadi Omar", "INV-S3")
+
+        self.assertEqual(self._customers("s23u"), ["Juma Ali"])
+        self.assertEqual(self._customers("GALAXY S23U"), ["Juma Ali"])
+        self.assertEqual(self._customers("samsung s23 ultra"), ["Juma Ali"])
+
+    def test_lookup_by_brand_lists_all_of_that_brand(self):
+        self._sell("iPhone 15", "Halima Musa", "INV-A1", brand="Apple")
+
+        self.assertEqual(self._customers("apple"), ["Halima Musa"])
+        self.assertEqual(self._customers("samsung"), ["Amina Yusuf"])
+
+    def test_lookup_combines_a_model_word_with_a_customer_word(self):
+        self._sell("Galaxy S23 Ultra", "Juma Ali", "INV-S1")
+        self._sell("Galaxy S23 Ultra", "Neema Said", "INV-S2")
+
+        self.assertEqual(self._customers("s23 neema"), ["Neema Said"])
+
+    def test_lookup_by_customer_phone_number(self):
+        self._sell("Galaxy S23 Ultra", "Juma Ali", "INV-S1", phone="255744123456")
+        self.assertEqual(self._customers("744123"), ["Juma Ali"])
+
+    def test_lookup_returns_nothing_for_an_unknown_model(self):
+        self.assertEqual(self._customers("Pixel 9"), [])
+
+    def test_lookup_lists_the_newest_sales_first_and_caps_the_list(self):
+        for i in range(35):
+            self._sell("Galaxy S23 Ultra", f"Buyer {i}", f"INV-B{i}")
+        res = self.client.get("/api/v1/returns/lookup/", {"q": "s23 ultra"})
+        rows = res.json()
+        self.assertEqual(len(rows), 30)
+        self.assertEqual(rows[0]["customerName"], "Buyer 34")
+
     def _return_payload(self):
         return {
             "saleItem": str(self.sale_item.id),

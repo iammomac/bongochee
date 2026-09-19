@@ -21,6 +21,15 @@ export function formatDayMonth(iso: string) {
   return p ? `${p.day} ${MONTHS[p.month - 1]}` : iso;
 }
 
+// Today's date as "2026-09-19" in the viewer's own timezone. Not new Date().toISOString(),
+// which is the UTC day and so reads as "yesterday" for the first hours after midnight in
+// Tanzania (UTC+3).
+export function todayIso() {
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
 // "2026-09-19T14:32:10+03:00" -> "19 Sep 2026, 14:32" in the viewer's own timezone.
 export function formatDateTime(iso: string) {
   const d = new Date(iso);

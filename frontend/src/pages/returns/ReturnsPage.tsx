@@ -11,6 +11,7 @@ import {
   updateReturnStatus,
   uploadReturnPhoto,
 } from "../../services/returns";
+import { formatDateTime, todayIso } from "../../lib/dates";
 import { extractErrorMessage } from "../../lib/errors";
 import { usePermissions } from "../../hooks/usePermissions";
 import type { ReturnCategory, ReturnRecord, ReturnStatus, SaleItemLookupResult } from "../../types";
@@ -27,6 +28,9 @@ const RETURN_CATEGORIES: { value: ReturnCategory; label: string }[] = [
 ];
 
 const RETURN_STATUSES: ReturnStatus[] = ["pending", "processing", "resolved", "cancelled"];
+
+// Must match LOOKUP_RESULT_LIMIT in backend/returns_app/views.py; a full list means there may be more.
+const LOOKUP_RESULT_LIMIT = 30;
 
 const STATUS_STYLES: Record<ReturnStatus, string> = {
   pending: "bg-warning/10 text-warning",
@@ -212,7 +216,7 @@ export default function ReturnsPage() {
   const [searched, setSearched] = useState(false);
   const [selected, setSelected] = useState<SaleItemLookupResult | null>(null);
 
-  const [returnDate, setReturnDate] = useState(new Date().toISOString().slice(0, 10));
+  const [returnDate, setReturnDate] = useState(todayIso());
   const [returnCategory, setReturnCategory] = useState<ReturnCategory>("battery");
   const [description, setDescription] = useState("");
   const [photos, setPhotos] = useState<File[]>([]);
@@ -255,7 +259,7 @@ export default function ReturnsPage() {
     setQuery("");
     setResults([]);
     setSearched(false);
-    setReturnDate(new Date().toISOString().slice(0, 10));
+    setReturnDate(todayIso());
     setReturnCategory("battery");
     setDescription("");
     setPhotos([]);
@@ -305,7 +309,7 @@ export default function ReturnsPage() {
         <div>
           <h1 className="text-2xl font-semibold">Returns</h1>
           <p className="text-sm text-gray-400">
-            Search by IMEI, invoice, or customer and review the return request
+            Search by phone model, IMEI, invoice, or customer and review the return request
           </p>
         </div>
         <button
@@ -329,7 +333,7 @@ export default function ReturnsPage() {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && void handleSearch()}
-              placeholder="Search by IMEI, invoice number, or customer name"
+              placeholder="Search by phone model (e.g. S23 Ultra), IMEI, invoice, or customer"
               className="w-full bg-transparent text-sm outline-none"
               autoFocus
             />
@@ -350,22 +354,34 @@ export default function ReturnsPage() {
       ) : null}
 
       {showAddPanel && results.length > 1 ? (
-        <div className="card divide-y divide-gray-100 overflow-hidden dark:divide-gray-800">
-          {results.map((result) => (
-            <button
-              key={result.id}
-              type="button"
-              onClick={() => setSelected(result)}
-              className={`flex w-full items-center justify-between px-4 py-3 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-800 ${
-                selected?.id === result.id ? "bg-primary/5" : ""
-              }`}
-            >
-              <span>
-                {result.categoryName} {result.modelName} — {result.customerName}
-              </span>
-              <span className="text-xs text-gray-400">{result.invoiceNumber}</span>
-            </button>
-          ))}
+        <div className="card overflow-hidden">
+          <p className="border-b border-gray-100 px-4 py-2.5 text-xs text-gray-400 dark:border-gray-800">
+            {results.length >= LOOKUP_RESULT_LIMIT
+              ? `Showing the ${results.length} most recent matches — type more (a customer name, say) to narrow it down. `
+              : `${results.length} matching sales. `}
+            Pick the one you want.
+          </p>
+          <div className="max-h-96 divide-y divide-gray-100 overflow-y-auto dark:divide-gray-800">
+            {results.map((result) => (
+              <button
+                key={result.id}
+                type="button"
+                onClick={() => setSelected(result)}
+                className={`flex w-full items-center justify-between gap-3 px-4 py-3 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-800 ${
+                  selected?.id === result.id ? "bg-primary/5" : ""
+                }`}
+              >
+                <span className="min-w-0">
+                  <span className="block truncate font-medium">{result.customerName}</span>
+                  <span className="block truncate text-xs text-gray-400">
+                    {result.categoryName} {result.modelName} · IMEI {result.imei || "—"} · {formatDateTime(result.saleDate)} ·
+                    Sold by {result.soldByName}
+                  </span>
+                </span>
+                <span className="shrink-0 text-xs text-gray-400">{result.invoiceNumber}</span>
+              </button>
+            ))}
+          </div>
         </div>
       ) : null}
 
@@ -389,7 +405,7 @@ export default function ReturnsPage() {
                 <p className="text-xs uppercase tracking-[0.2em] text-gray-400">Sale</p>
                 <p className="mt-2 font-semibold">{selected.invoiceNumber}</p>
                 <p className="text-xs text-gray-400">
-                  {new Date(selected.saleDate).toLocaleDateString()} · Sold by {selected.soldByName}
+                  {formatDateTime(selected.saleDate)} · Sold by {selected.soldByName}
                 </p>
               </div>
             </div>

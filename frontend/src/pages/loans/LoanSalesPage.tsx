@@ -14,6 +14,7 @@ import {
   removeLoanPayment,
   updateLoanSale,
 } from "../../services/loans";
+import { todayIso } from "../../lib/dates";
 import { extractErrorMessage } from "../../lib/errors";
 import { currency } from "../../lib/money";
 import { usePermissions } from "../../hooks/usePermissions";
@@ -44,7 +45,6 @@ function statusBadge(status: LoanStatus) {
   return { label: "Open", className: "bg-danger/10 text-danger" };
 }
 
-const todayISO = () => new Date().toISOString().slice(0, 10);
 
 interface LoanDetailModalProps {
   loan: LoanSale;
@@ -67,7 +67,7 @@ function LoanDetailModal({ loan, onClose, onChanged, canEdit, canDelete, canReco
 
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash");
-  const [paymentDate, setPaymentDate] = useState(todayISO());
+  const [paymentDate, setPaymentDate] = useState(todayIso());
   const [paymentNotes, setPaymentNotes] = useState("");
   const [recordingPayment, setRecordingPayment] = useState(false);
 
