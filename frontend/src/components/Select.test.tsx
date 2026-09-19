@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -72,6 +72,29 @@ describe("Select", () => {
     expect(screen.getByRole("listbox")).toBeInTheDocument();
 
     await user.keyboard("{Escape}");
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+  });
+
+  it("stays open while you scroll through its own list", async () => {
+    const user = userEvent.setup();
+    render(<ControlledSelect />);
+    await user.click(screen.getByRole("button"));
+
+    const list = screen.getByRole("listbox");
+    fireEvent.scroll(list, { target: { scrollTop: 120 } });
+    fireEvent.scroll(list, { target: { scrollTop: 240 } });
+
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
+  });
+
+  it("still closes when the page behind it scrolls", async () => {
+    const user = userEvent.setup();
+    render(<ControlledSelect />);
+    await user.click(screen.getByRole("button"));
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
+
+    fireEvent.scroll(document.body);
+
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
   });
 

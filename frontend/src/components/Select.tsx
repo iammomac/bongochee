@@ -44,7 +44,7 @@ export function Select({ value, onChange, children, name, disabled, className = 
   // which triggers this component to re-render, which creates a fresh close()
   // again: an infinite loop.
   const close = useCallback(() => setOpen(false), []);
-  const panelStyle = useDropdownPosition(triggerRef, open, close);
+  const panelStyle = useDropdownPosition(triggerRef, panelRef, open, close);
 
   useEffect(() => {
     if (!open) return;
@@ -93,7 +93,9 @@ export function Select({ value, onChange, children, name, disabled, className = 
               ref={panelRef}
               role="listbox"
               style={panelStyle}
-              className="z-50 max-h-64 overflow-auto rounded-xl border border-gray-100 bg-white py-1 shadow-lg dark:border-gray-800 dark:bg-gray-900"
+              // overscroll-contain: reaching the end of the list must not hand the wheel
+              // gesture to the page behind it, which would scroll it and close the list.
+              className="z-50 max-h-64 overflow-auto overscroll-contain rounded-xl border border-gray-100 bg-white py-1 shadow-lg dark:border-gray-800 dark:bg-gray-900"
             >
               {options.map((opt) => (
                 <button

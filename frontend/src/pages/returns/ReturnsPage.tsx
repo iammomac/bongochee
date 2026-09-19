@@ -43,7 +43,7 @@ function StatusSelect({ value, onChange }: { value: ReturnStatus; onChange: (sta
   const close = useCallback(() => setOpen(false), []);
   // Portaled + fixed-positioned rather than absolute — this dropdown sits inside a
   // table wrapped in an overflow-hidden card, which was clipping/hiding it entirely.
-  const panelStyle = useDropdownPosition(triggerRef, open, close);
+  const panelStyle = useDropdownPosition(triggerRef, panelRef, open, close);
 
   useEffect(() => {
     if (!open) return;

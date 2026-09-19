@@ -89,7 +89,7 @@ export function SearchCreateCombobox<T extends NamedItem>({
         {value && !open ? <Check size={14} className="shrink-0 text-success" /> : null}
       </div>
       {open && !disabled ? (
-        <div className="absolute z-10 mt-1 w-full rounded-2xl border border-gray-100 bg-white p-1 shadow-lg dark:border-gray-800 dark:bg-gray-900">
+        <div className="absolute z-10 mt-1 max-h-64 w-full overflow-y-auto overscroll-contain rounded-2xl border border-gray-100 bg-white p-1 shadow-lg dark:border-gray-800 dark:bg-gray-900">
           {loading ? (
             <div className="px-3 py-2 text-sm text-gray-400">Searching…</div>
           ) : (

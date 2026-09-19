@@ -6,7 +6,17 @@ import { useEffect, useState, type CSSProperties, type RefObject } from "react";
 // rounded card) — clipping was exactly the earlier "dropdown invisible inside
 // the table" bug. Re-anchoring on every scroll/resize is unnecessary for a
 // menu this short-lived — closing on either is simpler and still expected.
-export function useDropdownPosition(triggerRef: RefObject<HTMLElement | null>, open: boolean, onClose: () => void) {
+//
+// The scroll listener is registered in the capture phase (scroll events don't bubble,
+// so that's the only way to hear an ancestor scroller), which means it also hears the
+// dropdown's OWN list scrolling. panelRef exists so those can be ignored — without it
+// the list closed the moment you tried to scroll through its options.
+export function useDropdownPosition(
+  triggerRef: RefObject<HTMLElement | null>,
+  panelRef: RefObject<HTMLElement | null>,
+  open: boolean,
+  onClose: () => void,
+) {
   const [style, setStyle] = useState<CSSProperties | null>(null);
 
   useEffect(() => {
@@ -23,14 +33,18 @@ export function useDropdownPosition(triggerRef: RefObject<HTMLElement | null>, o
         : { position: "fixed", left: rect.left, width: rect.width, top: rect.bottom + 4 },
     );
 
-    const close = () => onClose();
-    window.addEventListener("scroll", close, true);
-    window.addEventListener("resize", close);
-    return () => {
-      window.removeEventListener("scroll", close, true);
-      window.removeEventListener("resize", close);
+    const closeOnPageScroll = (event: Event) => {
+      if (panelRef.current?.contains(event.target as Node)) return;
+      onClose();
     };
-  }, [open, triggerRef, onClose]);
+    const closeOnResize = () => onClose();
+    window.addEventListener("scroll", closeOnPageScroll, true);
+    window.addEventListener("resize", closeOnResize);
+    return () => {
+      window.removeEventListener("scroll", closeOnPageScroll, true);
+      window.removeEventListener("resize", closeOnResize);
+    };
+  }, [open, triggerRef, panelRef, onClose]);
 
   return style;
 }
