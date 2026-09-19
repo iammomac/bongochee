@@ -2,6 +2,7 @@ import { api } from "./api";
 import type {
   LossReportRow,
   PersonReport,
+  ReportWithDetails,
   ReturnsSummaryRow,
   SalesSummaryResponse,
   StockSummaryRow,
@@ -41,24 +42,24 @@ export async function getSalesSummary(filters: ReportFilters) {
 }
 
 export async function getReturnsSummary(filters: ReportFilters) {
-  const { data } = await api.get<{ rows: ReturnsSummaryRow[] }>("/reports/returns-summary/", {
+  const { data } = await api.get<ReportWithDetails<ReturnsSummaryRow>>("/reports/returns-summary/", {
     params: toParams(filters),
   });
-  return data.rows;
+  return data;
 }
 
 export async function getStockSummary(filters: ReportFilters) {
-  const { data } = await api.get<{ rows: StockSummaryRow[] }>("/reports/stock-summary/", {
+  const { data } = await api.get<ReportWithDetails<StockSummaryRow>>("/reports/stock-summary/", {
     params: toParams(filters),
   });
-  return data.rows;
+  return data;
 }
 
 export async function getSupplierSummary(filters: ReportFilters) {
-  const { data } = await api.get<{ rows: SupplierSummaryRow[] }>("/reports/supplier-summary/", {
+  const { data } = await api.get<ReportWithDetails<SupplierSummaryRow>>("/reports/supplier-summary/", {
     params: toParams(filters),
   });
-  return data.rows;
+  return data;
 }
 
 export async function getLossReport(filters: ReportFilters) {

@@ -110,12 +110,23 @@ class BaseReportView(APIView):
     export_filename = "report"
     profit_fields = ()  # field keys stripped from columns/rows/totals without view_profit
     requires_view_profit = False  # True for reports that are entirely profit/cost data
+    # Same idea for the detail table -- kept separate since its keys differ
+    # (e.g. buying_price and stock_value only exist there).
+    detail_profit_fields = ()
+    # Detail columns that get a grand-total row at the bottom.
+    detail_sum_keys = ()
 
     def build_report(self, request):
         """Returns (columns, rows, totals): columns = [(key, label), ...] used for
         export headers; rows = list of dicts (returned as-is for JSON, projected
         through columns for export); totals = dict or None."""
         raise NotImplementedError
+
+    def build_details(self, request):
+        """Optional: (columns, rows) for the full per-transaction table shown under
+        the grouped summary, or None when the report's own rows already are the
+        transaction list."""
+        return None
 
     def get(self, request, *args, **kwargs):
         if self.requires_view_profit and not _user_has_permission(request.user, "view_profit"):
@@ -131,26 +142,51 @@ class BaseReportView(APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
+        can_view_profit = _user_has_permission(request.user, "view_profit")
         columns, rows, totals = self.build_report(request)
 
-        if self.profit_fields and not _user_has_permission(request.user, "view_profit"):
+        if self.profit_fields and not can_view_profit:
             columns = [(key, label) for key, label in columns if key not in self.profit_fields]
             rows = [{k: v for k, v in row.items() if k not in self.profit_fields} for row in rows]
             if totals:
                 totals = {k: v for k, v in totals.items() if k not in self.profit_fields}
 
+        detail_columns, detail_rows, detail_totals = None, None, None
+        built_details = self.build_details(request)
+        if built_details is not None:
+            detail_columns, detail_rows = built_details
+            if self.detail_profit_fields and not can_view_profit:
+                detail_columns = [(key, label) for key, label in detail_columns if key not in self.detail_profit_fields]
+                detail_rows = [{k: v for k, v in row.items() if k not in self.detail_profit_fields} for row in detail_rows]
+            detail_totals = {
+                key: sum((row.get(key) or 0 for row in detail_rows), 0)
+                for key, _ in detail_columns
+                if key in self.detail_sum_keys
+            }
+
         if export_format in ("xlsx", "pdf"):
             headers = [label for _, label in columns]
             data_rows = [[row.get(key) for key, _ in columns] for row in rows]
+            detail = None
+            if detail_columns is not None:
+                detail = {
+                    "headers": [label for _, label in detail_columns],
+                    "rows": [[row.get(key) for key, _ in detail_columns] for row in detail_rows],
+                    # Label sits in the first column; sums line up under their own columns.
+                    "total_row": ["Total"] + [detail_totals.get(key, "") for key, _ in detail_columns[1:]],
+                }
             if export_format == "xlsx":
-                return rows_to_xlsx(self.export_filename, headers, data_rows)
+                return rows_to_xlsx(self.export_filename, headers, data_rows, detail)
             return rows_to_pdf(
-                self.export_filename, self.export_filename.replace("_", " ").title(), headers, data_rows
+                self.export_filename, self.export_filename.replace("_", " ").title(), headers, data_rows, detail
             )
 
         payload = {"rows": rows}
         if totals is not None:
             payload["totals"] = totals
+        if detail_rows is not None:
+            payload["details"] = detail_rows
+            payload["detail_totals"] = detail_totals
         return Response(payload)
 
 
@@ -160,6 +196,8 @@ class SalesSummaryView(BaseReportView):
 
     export_filename = "sales_report"
     profit_fields = ("profit",)
+    detail_profit_fields = ("profit",)
+    detail_sum_keys = ("units", "price_sold", "discount", "revenue", "profit")
 
     def build_report(self, request):
         date_from, date_to = _date_range(request)
@@ -175,9 +213,33 @@ class SalesSummaryView(BaseReportView):
         ]
         return columns, rows, totals
 
+    def build_details(self, request):
+        date_from, date_to = _date_range(request)
+        rows = services.sales_detail_rows(date_from, date_to, **_filters(request))
+        columns = [
+            ("date", "Date"),
+            ("time", "Time"),
+            ("invoice_number", "Invoice"),
+            ("sold_by_name", "Salesperson"),
+            ("customer_name", "Customer"),
+            ("category_name", "Category"),
+            ("model_name", "Model"),
+            ("supplier_name", "Supplier"),
+            ("units", "Units"),
+            ("price_sold", "Price Sold"),
+            ("discount", "Discount"),
+            ("revenue", "Revenue"),
+            ("profit", "Profit"),
+            ("condition", "Condition"),
+            ("sale_notes", "Sale Notes"),
+        ]
+        return columns, rows
+
 
 class ReturnsSummaryView(BaseReportView):
     export_filename = "returns_report"
+    detail_profit_fields = ("profit",)
+    detail_sum_keys = ("units", "price_sold", "revenue", "profit")
 
     def build_report(self, request):
         date_from, date_to = _date_range(request)
@@ -189,10 +251,56 @@ class ReturnsSummaryView(BaseReportView):
         columns = [("label", group_by.title()), ("count", "Count")]
         return columns, rows, None
 
+    def build_details(self, request):
+        date_from, date_to = _date_range(request)
+        filters = _filters(request)
+        rows = services.returns_detail_rows(
+            date_from, date_to, category=filters["category"], model=filters["model"], user=filters["user"]
+        )
+        columns = [
+            ("date", "Return Date"),
+            ("time", "Time"),
+            ("invoice_number", "Invoice"),
+            ("processed_by_name", "Processed By"),
+            ("customer_name", "Customer"),
+            ("category_name", "Category"),
+            ("model_name", "Model"),
+            ("supplier_name", "Supplier"),
+            ("units", "Units"),
+            ("price_sold", "Price Sold"),
+            ("revenue", "Revenue"),
+            ("profit", "Profit"),
+            ("condition", "Condition"),
+            ("issue", "Issue"),
+            ("status", "Status"),
+            ("description", "Description"),
+        ]
+        return columns, rows
+
+
+STOCK_DETAIL_COLUMNS = [
+    ("date", "Date Added"),
+    ("time", "Time"),
+    ("added_by_name", "Added By"),
+    ("supplier_name", "Supplier"),
+    ("category_name", "Category"),
+    ("model_name", "Model"),
+    ("quantity", "Qty Imported"),
+    ("quantity_remaining", "Qty Remaining"),
+    ("units_sold", "Units Sold"),
+    ("buying_price", "Buying Price"),
+    ("stock_value", "Stock Value"),
+    ("revenue", "Revenue"),
+    ("profit", "Profit"),
+    ("condition", "Condition"),
+]
+
 
 class StockSummaryView(BaseReportView):
     export_filename = "stock_report"
     profit_fields = ("value",)
+    detail_profit_fields = ("buying_price", "stock_value", "profit")
+    detail_sum_keys = ("quantity", "quantity_remaining", "units_sold", "stock_value", "revenue", "profit")
 
     def build_report(self, request):
         group_by = request.query_params.get("group_by", "category")
@@ -203,10 +311,19 @@ class StockSummaryView(BaseReportView):
         columns = [("label", group_by.title()), ("quantity", "Quantity"), ("value", "Stock Value")]
         return columns, rows, None
 
+    def build_details(self, request):
+        filters = _filters(request)
+        rows = services.stock_detail_rows(
+            category=filters["category"], model=filters["model"], supplier=filters["supplier"]
+        )
+        return STOCK_DETAIL_COLUMNS, rows
+
 
 class SupplierSummaryView(BaseReportView):
     export_filename = "supplier_report"
     profit_fields = ("value",)
+    detail_profit_fields = ("buying_price", "stock_value", "profit")
+    detail_sum_keys = ("quantity", "quantity_remaining", "units_sold", "stock_value", "revenue", "profit")
 
     def build_report(self, request):
         date_from, date_to = _date_range(request)
@@ -214,6 +331,13 @@ class SupplierSummaryView(BaseReportView):
         rows = services.supplier_rows(date_from, date_to, supplier=filters["supplier"])
         columns = [("label", "Supplier"), ("quantity", "Quantity Imported"), ("value", "Stock Value")]
         return columns, rows, None
+
+    def build_details(self, request):
+        date_from, date_to = _date_range(request)
+        rows = services.stock_detail_rows(
+            supplier=_filters(request)["supplier"], date_from=date_from, date_to=date_to
+        )
+        return STOCK_DETAIL_COLUMNS, rows
 
 
 class LossReportView(BaseReportView):
@@ -226,15 +350,24 @@ class LossReportView(BaseReportView):
         rows = services.loss_rows(date_from, date_to, **filters)
         columns = [
             ("date", "Date"),
+            ("time", "Time"),
             ("invoice_number", "Invoice"),
+            ("sold_by_name", "Salesperson"),
             ("customer_name", "Customer"),
             ("category_name", "Category"),
             ("model_name", "Model"),
+            ("supplier_name", "Supplier"),
             ("imei", "IMEI"),
-            ("net_price", "Net Price"),
+            ("units", "Units"),
+            ("price_sold", "Price Sold"),
+            ("discount", "Discount"),
+            ("net_price", "Revenue"),
             ("buying_price", "Buying Price"),
             ("min_selling_price", "Min Price"),
+            ("profit", "Profit"),
             ("loss_type_display", "Loss Type"),
+            ("condition", "Condition"),
+            ("sale_notes", "Sale Notes"),
         ]
         return columns, rows, None
 

@@ -96,7 +96,11 @@ class DashboardSummaryTests(APITestCase):
         self.assertEqual(res.json()["pendingPasswordRequests"], 1)
 
 
-class ReportEndpointsTests(APITestCase):
+class ReportFixtures(APITestCase):
+    """One sale of three units of one model (one profitable, one below buying price,
+    one below minimum), a return on the first, and three users with different
+    report permissions -- shared by the endpoint and detail-table tests."""
+
     def setUp(self):
         self.view_reports = Permission.objects.create(codename="view_reports", label="View Reports", category="reports")
         self.export_reports = Permission.objects.create(
@@ -180,6 +184,8 @@ class ReportEndpointsTests(APITestCase):
         today = date.today().isoformat()
         return {"date_from": today, "date_to": today}
 
+
+class ReportEndpointsTests(ReportFixtures):
     def test_sales_summary_totals(self):
         res = self.client.get("/api/v1/reports/sales-summary/", self._range())
         self.assertEqual(res.status_code, status.HTTP_200_OK)
@@ -255,6 +261,142 @@ class ReportEndpointsTests(APITestCase):
 
         res = self.client.get("/api/v1/reports/loss/", self._range())
         self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN)
+
+
+class ReportDetailTests(ReportFixtures):
+    """Every report type carries the full per-transaction table, not just the
+    grouped summary -- see BaseReportView.build_details."""
+
+    def setUp(self):
+        super().setUp()
+        self.stock_item.notes = "Full box"
+        self.stock_item.save(update_fields=["notes"])
+        Sale.objects.filter(invoice_number="INV-REPORT-1").update(notes="Pays balance Friday")
+
+    def test_sales_detail_row_carries_every_requested_field(self):
+        res = self.client.get("/api/v1/reports/sales-summary/", self._range())
+        details = res.json()["details"]
+        # Three units of the same model in one sale collapse into a single row.
+        self.assertEqual(len(details), 1)
+        row = details[0]
+        self.assertRegex(row["time"], r"^\d{2}:\d{2}$")
+        self.assertRegex(row["date"], r"^\d{4}-\d{2}-\d{2}$")
+        self.assertEqual(row["invoiceNumber"], "INV-REPORT-1")
+        self.assertEqual(row["soldByName"], "salesperson1")
+        self.assertEqual(row["customerName"], "Walk-in")
+        self.assertEqual(row["categoryName"], "Samsung")
+        self.assertEqual(row["modelName"], "Galaxy A56")
+        self.assertEqual(row["supplierName"], "Blue Telecom")
+        self.assertEqual(row["units"], 3)
+        self.assertEqual(float(row["priceSold"]), 1780000.0)  # 650000 + 480000 + 650000
+        self.assertEqual(float(row["discount"]), 100000.0)
+        self.assertEqual(float(row["revenue"]), 1680000.0)
+        self.assertEqual(float(row["profit"]), 180000.0)  # 1680000 - 3 x 500000
+        self.assertEqual(row["condition"], "Full box")
+        self.assertEqual(row["saleNotes"], "Pays balance Friday")
+
+    def test_sales_detail_totals_row_up_the_columns(self):
+        totals = self.client.get("/api/v1/reports/sales-summary/", self._range()).json()["detailTotals"]
+        self.assertEqual(totals["units"], 3)
+        self.assertEqual(float(totals["revenue"]), 1680000.0)
+        self.assertEqual(float(totals["profit"]), 180000.0)
+
+    def test_sales_detail_is_the_same_whatever_the_group_by(self):
+        for group_by in ("day", "category", "model", "user", "payment_method", "supplier"):
+            res = self.client.get("/api/v1/reports/sales-summary/", {**self._range(), "group_by": group_by})
+            self.assertEqual(len(res.json()["details"]), 1, group_by)
+
+    def test_sales_detail_respects_filters(self):
+        other = Category.objects.create(name="Apple")
+        res = self.client.get("/api/v1/reports/sales-summary/", {**self._range(), "category": str(other.id)})
+        self.assertEqual(res.json()["details"], [])
+
+    def test_detail_profit_is_hidden_without_view_profit(self):
+        self.client.force_authenticate(self.viewer)  # view_reports only
+        for path in ("sales-summary", "returns-summary", "stock-summary", "supplier-summary"):
+            body = self.client.get(f"/api/v1/reports/{path}/", self._range()).json()
+            self.assertTrue(body["details"], path)
+            for row in body["details"]:
+                self.assertNotIn("profit", row, path)
+            self.assertNotIn("profit", body["detailTotals"], path)
+        stock = self.client.get("/api/v1/reports/stock-summary/").json()["details"][0]
+        self.assertNotIn("buyingPrice", stock)
+        self.assertNotIn("stockValue", stock)
+
+    def test_returns_detail_row(self):
+        row = self.client.get("/api/v1/reports/returns-summary/", self._range()).json()["details"][0]
+        self.assertRegex(row["time"], r"^\d{2}:\d{2}$")
+        self.assertEqual(row["invoiceNumber"], "INV-REPORT-1")
+        self.assertEqual(row["processedByName"], "salesperson1")
+        self.assertEqual(row["customerName"], "Walk-in")
+        self.assertEqual(row["supplierName"], "Blue Telecom")
+        self.assertEqual(row["units"], 1)
+        self.assertEqual(float(row["priceSold"]), 650000.0)
+        self.assertEqual(float(row["revenue"]), 650000.0)
+        self.assertEqual(float(row["profit"]), 150000.0)
+        self.assertEqual(row["condition"], "Full box")
+        self.assertEqual(row["issue"], "Battery")
+        self.assertEqual(row["status"], "Pending")
+
+    def test_stock_detail_row_shows_what_sold_from_the_line(self):
+        row = self.client.get("/api/v1/reports/stock-summary/").json()["details"][0]
+        self.assertEqual(row["addedByName"], "salesperson1")
+        self.assertEqual(row["supplierName"], "Blue Telecom")
+        self.assertEqual(row["quantity"], 10)
+        self.assertEqual(row["quantityRemaining"], 7)
+        self.assertEqual(row["unitsSold"], 3)
+        self.assertEqual(float(row["stockValue"]), 3500000.0)  # 7 x 500000
+        self.assertEqual(float(row["revenue"]), 1680000.0)
+        self.assertEqual(float(row["profit"]), 180000.0)
+        self.assertEqual(row["condition"], "Full box")
+
+    def test_supplier_detail_is_limited_to_the_import_date_range(self):
+        inside = self.client.get("/api/v1/reports/supplier-summary/", self._range()).json()["details"]
+        self.assertEqual(len(inside), 1)
+        outside = self.client.get(
+            "/api/v1/reports/supplier-summary/", {"date_from": "2001-01-01", "date_to": "2001-01-02"}
+        ).json()["details"]
+        self.assertEqual(outside, [])
+
+    def test_loss_rows_carry_the_same_fields(self):
+        row = self.client.get("/api/v1/reports/loss/", self._range()).json()["rows"][0]
+        for key in (
+            "time", "soldByName", "supplierName", "units", "priceSold", "discount", "profit", "condition", "saleNotes",
+        ):
+            self.assertIn(key, row)
+        self.assertEqual(row["soldByName"], "salesperson1")
+        self.assertEqual(row["condition"], "Full box")
+
+    def test_xlsx_export_has_a_summary_and_a_details_sheet(self):
+        res = self.client.get("/api/v1/reports/sales-summary/", {**self._range(), "export": "xlsx"})
+        workbook = openpyxl.load_workbook(io.BytesIO(res.content))
+        self.assertEqual(workbook.sheetnames, ["Summary", "Details"])
+        details = list(workbook["Details"].iter_rows(values_only=True))
+        self.assertEqual(details[0][:4], ("Date", "Time", "Invoice", "Salesperson"))
+        self.assertEqual(details[1][2], "INV-REPORT-1")
+        self.assertEqual(details[-1][0], "Total")  # grand-total row under the detail lines
+        self.assertIn("Condition", details[0])
+        self.assertIn("Full box", details[1])
+
+    def test_pdf_export_with_details_is_a_valid_pdf(self):
+        for path in ("sales-summary", "returns-summary", "stock-summary", "supplier-summary", "loss"):
+            res = self.client.get(f"/api/v1/reports/{path}/", {**self._range(), "export": "pdf"})
+            self.assertEqual(res.status_code, status.HTTP_200_OK, path)
+            self.assertTrue(res.content.startswith(b"%PDF"), path)
+
+    def test_xlsx_export_without_view_profit_omits_profit_columns(self):
+        exporter_role = Role.objects.create(name="ExportOnly")
+        exporter_role.permissions.add(self.view_reports, self.export_reports)
+        exporter = User.objects.create_user(
+            username="exportonly", password="Str0ngPassw0rd!", phone="255700000073",
+            role=exporter_role, must_change_password=False,
+        )
+        self.client.force_authenticate(exporter)
+        res = self.client.get("/api/v1/reports/sales-summary/", {**self._range(), "export": "xlsx"})
+        workbook = openpyxl.load_workbook(io.BytesIO(res.content))
+        header = [cell.value for cell in workbook["Details"][1]]
+        self.assertNotIn("Profit", header)
+        self.assertIn("Revenue", header)
 
 
 class FullBackupExportTests(APITestCase):

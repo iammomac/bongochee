@@ -50,6 +50,17 @@ def filtered_sale_items(date_from, date_to, category=None, model=None, supplier=
     return qs
 
 
+def _person_name(first_name, last_name, username):
+    return f"{first_name or ''} {last_name or ''}".strip() or username
+
+
+def _local_date_time(dt):
+    """(ISO date, 'HH:MM') in the shop's local timezone -- the same clock the
+    date-range filters use, so a late-evening sale never lands on the wrong day."""
+    local = timezone.localtime(dt)
+    return local.date().isoformat(), local.strftime("%H:%M")
+
+
 def _aggregate_sales(qs):
     totals = qs.aggregate(units=Count("id"), revenue=Sum(NET_PRICE), profit=Sum(PROFIT))
     return {
@@ -116,15 +127,80 @@ def sales_totals(date_from, date_to, **filters):
     return _aggregate_sales(filtered_sale_items(date_from, date_to, **filters))
 
 
+def sales_detail_rows(date_from, date_to, **filters):
+    """One row per (sale, model) -- e.g. a sale of 3 units of the same phone is a
+    single row with units=3, while a sale mixing two models is two rows. Every
+    grouped sales report (by day/brand/model/salesperson/...) shares this same
+    underlying list, so the detail never depends on the chosen group_by."""
+    grouped = (
+        filtered_sale_items(date_from, date_to, **filters)
+        .values(
+            "sale_id",
+            "stock_item_id",
+            "sale__created_at",
+            "sale__invoice_number",
+            "sale__customer_name",
+            "sale__notes",
+            "sale__sold_by__first_name",
+            "sale__sold_by__last_name",
+            "sale__sold_by__username",
+            "stock_item__category__name",
+            "stock_item__model__name",
+            "stock_item__stock_in__supplier__name",
+            "stock_item__notes",
+        )
+        # "discount_total", not "discount": an annotation can't share a name with a
+        # field on the model it's built from.
+        .annotate(
+            units=Count("id"),
+            price_sold=Sum("selling_price"),
+            discount_total=Sum("discount"),
+            revenue=Sum(NET_PRICE),
+            profit=Sum(PROFIT),
+        )
+        .order_by("-sale__created_at", "sale__invoice_number")
+    )
+    rows = []
+    for row in grouped:
+        date_str, time_str = _local_date_time(row["sale__created_at"])
+        rows.append(
+            {
+                "key": f"{row['sale_id']}:{row['stock_item_id']}",
+                "date": date_str,
+                "time": time_str,
+                "invoice_number": row["sale__invoice_number"],
+                "sold_by_name": _person_name(
+                    row["sale__sold_by__first_name"], row["sale__sold_by__last_name"], row["sale__sold_by__username"]
+                ),
+                "customer_name": row["sale__customer_name"],
+                "category_name": row["stock_item__category__name"],
+                "model_name": row["stock_item__model__name"],
+                "supplier_name": row["stock_item__stock_in__supplier__name"],
+                "units": row["units"],
+                "price_sold": row["price_sold"] or 0,
+                "discount": row["discount_total"] or 0,
+                "revenue": row["revenue"] or 0,
+                "profit": row["profit"] or 0,
+                "condition": row["stock_item__notes"],
+                "sale_notes": row["sale__notes"],
+            }
+        )
+    return rows
+
+
 RETURNS_GROUP_BY_FIELDS = {
     "category": ("return_category", None),
     "model": ("sale_item__stock_item__model_id", "sale_item__stock_item__model__name"),
 }
 
 
-def returns_rows(date_from, date_to, group_by="category", category=None, model=None, user=None):
+def _filtered_returns(date_from, date_to, category=None, model=None, user=None):
     qs = Return.objects.filter(return_date__gte=date_from, return_date__lte=date_to).select_related(
-        "sale_item__stock_item__category", "sale_item__stock_item__model", "processed_by"
+        "sale_item__sale",
+        "sale_item__stock_item__category",
+        "sale_item__stock_item__model",
+        "sale_item__stock_item__stock_in__supplier",
+        "processed_by",
     )
     if category:
         qs = qs.filter(sale_item__stock_item__category_id=category)
@@ -132,6 +208,46 @@ def returns_rows(date_from, date_to, group_by="category", category=None, model=N
         qs = qs.filter(sale_item__stock_item__model_id=model)
     if user:
         qs = qs.filter(processed_by_id=user)
+    return qs
+
+
+def returns_detail_rows(date_from, date_to, category=None, model=None, user=None):
+    """One row per return, carrying the original sale's figures (price/revenue/
+    profit are what that phone sold for, not a refund amount)."""
+    rows = []
+    for ret in _filtered_returns(date_from, date_to, category, model, user).order_by("-return_date", "-created_at"):
+        item = ret.sale_item
+        stock_item = item.stock_item
+        net = item.selling_price - item.discount
+        _, time_str = _local_date_time(ret.created_at)
+        rows.append(
+            {
+                "key": str(ret.id),
+                "date": ret.return_date.isoformat(),
+                "time": time_str,
+                "invoice_number": item.sale.invoice_number,
+                "processed_by_name": _person_name(
+                    ret.processed_by.first_name, ret.processed_by.last_name, ret.processed_by.username
+                ),
+                "customer_name": item.sale.customer_name,
+                "category_name": stock_item.category.name,
+                "model_name": stock_item.model.name,
+                "supplier_name": stock_item.stock_in.supplier.name,
+                "units": 1,
+                "price_sold": item.selling_price,
+                "revenue": net,
+                "profit": net - stock_item.buying_price,
+                "condition": stock_item.notes,
+                "issue": ret.get_return_category_display(),
+                "status": ret.get_status_display(),
+                "description": ret.description,
+            }
+        )
+    return rows
+
+
+def returns_rows(date_from, date_to, group_by="category", category=None, model=None, user=None):
+    qs = _filtered_returns(date_from, date_to, category, model, user)
 
     id_field, label_field = RETURNS_GROUP_BY_FIELDS[group_by]
     values_fields = (id_field,) if label_field is None else (id_field, label_field)
@@ -180,6 +296,54 @@ def stock_rows(group_by="category", category=None, model=None, supplier=None):
     ]
 
 
+def stock_detail_rows(category=None, model=None, supplier=None, date_from=None, date_to=None):
+    """One row per stock line -- when it came in, who added it, from whom, its
+    condition note, and what's been sold from it so far. Serves both the Stock
+    report (a live snapshot, no date range) and the Supplier report (import-date
+    range)."""
+    qs = StockItem.objects.select_related("category", "model", "stock_in__supplier", "stock_in__created_by")
+    if category:
+        qs = qs.filter(category_id=category)
+    if model:
+        qs = qs.filter(model_id=model)
+    if supplier:
+        qs = qs.filter(stock_in__supplier_id=supplier)
+    if date_from:
+        qs = qs.filter(stock_in__import_date__gte=date_from)
+    if date_to:
+        qs = qs.filter(stock_in__import_date__lte=date_to)
+    qs = qs.annotate(
+        units_sold=Count("sale_items"),
+        revenue_total=Sum(F("sale_items__selling_price") - F("sale_items__discount")),
+    ).order_by("-stock_in__import_date", "-stock_in__created_at")
+
+    rows = []
+    for item in qs:
+        _, time_str = _local_date_time(item.stock_in.created_at)
+        creator = item.stock_in.created_by
+        revenue = item.revenue_total or 0
+        rows.append(
+            {
+                "key": str(item.id),
+                "date": item.stock_in.import_date.isoformat(),
+                "time": time_str,
+                "added_by_name": _person_name(creator.first_name, creator.last_name, creator.username),
+                "supplier_name": item.stock_in.supplier.name,
+                "category_name": item.category.name,
+                "model_name": item.model.name,
+                "quantity": item.quantity,
+                "quantity_remaining": item.quantity_remaining,
+                "units_sold": item.units_sold,
+                "buying_price": item.buying_price,
+                "stock_value": item.quantity_remaining * item.buying_price,
+                "revenue": revenue,
+                "profit": revenue - item.units_sold * item.buying_price,
+                "condition": item.notes,
+            }
+        )
+    return rows
+
+
 def supplier_rows(date_from, date_to, supplier=None):
     qs = StockItem.objects.filter(
         stock_in__import_date__gte=date_from, stock_in__import_date__lte=date_to
@@ -217,7 +381,7 @@ def loss_rows(date_from, date_to, **filters):
     landed below the batch's floor price (net below min_selling_price, allowed as a
     soft-warning sale — see sales/serializers.py) — never both at once, buying-price
     loss is the more severe classification and wins."""
-    qs = filtered_sale_items(date_from, date_to, **filters).select_related("sale")
+    qs = filtered_sale_items(date_from, date_to, **filters).order_by("-sale__created_at")
     rows = []
     for item in qs:
         net = item.selling_price - item.discount
@@ -229,6 +393,8 @@ def loss_rows(date_from, date_to, **filters):
             loss_type = "below_minimum_price"
         else:
             continue
+        date_str, time_str = _local_date_time(item.sale.created_at)
+        sold_by = item.sale.sold_by
         rows.append(
             {
                 "id": str(item.id),
@@ -237,7 +403,16 @@ def loss_rows(date_from, date_to, **filters):
                 "customer_name": item.sale.customer_name,
                 "category_name": item.stock_item.category.name,
                 "model_name": item.stock_item.model.name,
-                "date": item.sale.created_at.date().isoformat(),
+                "supplier_name": item.stock_item.stock_in.supplier.name,
+                "date": date_str,
+                "time": time_str,
+                "sold_by_name": _person_name(sold_by.first_name, sold_by.last_name, sold_by.username),
+                "units": 1,
+                "price_sold": item.selling_price,
+                "discount": item.discount,
+                "profit": net - buying_price,
+                "condition": item.stock_item.notes,
+                "sale_notes": item.sale.notes,
                 "net_price": net,
                 "buying_price": buying_price,
                 "min_selling_price": min_price,

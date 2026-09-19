@@ -29,10 +29,19 @@ import { searchSuppliers } from "../../services/suppliers";
 import { listUsers } from "../../services/users";
 import { usePermissions } from "../../hooks/usePermissions";
 import { PersonReportPanel } from "./PersonReportPanel";
+import {
+  DetailTable,
+  LOSS_DETAIL_COLUMNS,
+  RETURNS_DETAIL_COLUMNS,
+  SALES_DETAIL_COLUMNS,
+  STOCK_DETAIL_COLUMNS,
+} from "./DetailTable";
 import type {
   Category,
+  DetailRow,
   LossReportRow,
   PhoneModel,
+  ReportWithDetails,
   ReturnsSummaryRow,
   SalesSummaryResponse,
   StockSummaryRow,
@@ -74,6 +83,8 @@ const RETURNS_GROUP_OPTIONS = [
   { value: "category", label: "Return category" },
   { value: "model", label: "Model" },
 ];
+
+const EMPTY_REPORT = { rows: [], details: [], detailTotals: {} };
 
 function toIso(d: Date) {
   return d.toISOString().slice(0, 10);
@@ -272,79 +283,129 @@ function SalesReportView({
           </tbody>
         </table>
       </div>
+
+      <DetailTable
+        rows={data.details}
+        columns={SALES_DETAIL_COLUMNS}
+        getKey={(row: DetailRow) => row.key}
+        totals={data.detailTotals}
+        canViewProfit={canViewProfit}
+        emptyMessage="No sales in this range"
+      />
     </div>
   );
 }
 
-function StockReportView({ rows, canViewProfit }: { rows: StockSummaryRow[]; canViewProfit: boolean }) {
+function StockReportView({
+  report,
+  canViewProfit,
+}: {
+  report: ReportWithDetails<StockSummaryRow>;
+  canViewProfit: boolean;
+}) {
   return (
-    <div className="card overflow-hidden">
-      <table className="min-w-full text-sm">
-        <thead className="bg-gray-50 text-left text-gray-500 dark:bg-gray-950">
-          <tr>
-            <th className="px-4 py-3">Group</th>
-            <th className="px-4 py-3">Quantity</th>
-            {canViewProfit ? <th className="px-4 py-3">Stock value</th> : null}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr key={row.key} className="border-t border-gray-100 dark:border-gray-800">
-              <td className="px-4 py-3">{row.label}</td>
-              <td className="px-4 py-3">{row.quantity}</td>
-              {canViewProfit && row.value !== undefined ? (
-                <td className="px-4 py-3">TZS {currency(row.value)}</td>
-              ) : null}
-            </tr>
-          ))}
-          {rows.length === 0 ? (
+    <div className="space-y-4">
+      <div className="card overflow-hidden">
+        <table className="min-w-full text-sm">
+          <thead className="bg-gray-50 text-left text-gray-500 dark:bg-gray-950">
             <tr>
-              <td colSpan={3} className="px-4 py-8 text-center text-sm text-gray-400">
-                No stock data
-              </td>
+              <th className="px-4 py-3">Group</th>
+              <th className="px-4 py-3">Quantity</th>
+              {canViewProfit ? <th className="px-4 py-3">Stock value</th> : null}
             </tr>
-          ) : null}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {report.rows.map((row) => (
+              <tr key={row.key} className="border-t border-gray-100 dark:border-gray-800">
+                <td className="px-4 py-3">{row.label}</td>
+                <td className="px-4 py-3">{row.quantity}</td>
+                {canViewProfit && row.value !== undefined ? (
+                  <td className="px-4 py-3">TZS {currency(row.value)}</td>
+                ) : null}
+              </tr>
+            ))}
+            {report.rows.length === 0 ? (
+              <tr>
+                <td colSpan={3} className="px-4 py-8 text-center text-sm text-gray-400">
+                  No stock data
+                </td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
+      </div>
+
+      <DetailTable
+        rows={report.details}
+        columns={STOCK_DETAIL_COLUMNS}
+        getKey={(row: DetailRow) => row.key}
+        totals={report.detailTotals}
+        canViewProfit={canViewProfit}
+        emptyMessage="No stock lines"
+      />
     </div>
   );
 }
 
-function SupplierReportView({ rows, canViewProfit }: { rows: SupplierSummaryRow[]; canViewProfit: boolean }) {
+function SupplierReportView({
+  report,
+  canViewProfit,
+}: {
+  report: ReportWithDetails<SupplierSummaryRow>;
+  canViewProfit: boolean;
+}) {
   return (
-    <div className="card overflow-hidden">
-      <table className="min-w-full text-sm">
-        <thead className="bg-gray-50 text-left text-gray-500 dark:bg-gray-950">
-          <tr>
-            <th className="px-4 py-3">Supplier</th>
-            <th className="px-4 py-3">Quantity imported</th>
-            {canViewProfit ? <th className="px-4 py-3">Value</th> : null}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr key={row.key} className="border-t border-gray-100 dark:border-gray-800">
-              <td className="px-4 py-3">{row.label}</td>
-              <td className="px-4 py-3">{row.quantity}</td>
-              {canViewProfit && row.value !== undefined ? (
-                <td className="px-4 py-3">TZS {currency(row.value)}</td>
-              ) : null}
-            </tr>
-          ))}
-          {rows.length === 0 ? (
+    <div className="space-y-4">
+      <div className="card overflow-hidden">
+        <table className="min-w-full text-sm">
+          <thead className="bg-gray-50 text-left text-gray-500 dark:bg-gray-950">
             <tr>
-              <td colSpan={3} className="px-4 py-8 text-center text-sm text-gray-400">
-                No imports in this range
-              </td>
+              <th className="px-4 py-3">Supplier</th>
+              <th className="px-4 py-3">Quantity imported</th>
+              {canViewProfit ? <th className="px-4 py-3">Value</th> : null}
             </tr>
-          ) : null}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {report.rows.map((row) => (
+              <tr key={row.key} className="border-t border-gray-100 dark:border-gray-800">
+                <td className="px-4 py-3">{row.label}</td>
+                <td className="px-4 py-3">{row.quantity}</td>
+                {canViewProfit && row.value !== undefined ? (
+                  <td className="px-4 py-3">TZS {currency(row.value)}</td>
+                ) : null}
+              </tr>
+            ))}
+            {report.rows.length === 0 ? (
+              <tr>
+                <td colSpan={3} className="px-4 py-8 text-center text-sm text-gray-400">
+                  No imports in this range
+                </td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
+      </div>
+
+      <DetailTable
+        rows={report.details}
+        columns={STOCK_DETAIL_COLUMNS}
+        getKey={(row: DetailRow) => row.key}
+        totals={report.detailTotals}
+        canViewProfit={canViewProfit}
+        emptyMessage="No imports in this range"
+      />
     </div>
   );
 }
 
-function ReturnsReportView({ rows }: { rows: ReturnsSummaryRow[] }) {
+function ReturnsReportView({
+  report,
+  canViewProfit,
+}: {
+  report: ReportWithDetails<ReturnsSummaryRow>;
+  canViewProfit: boolean;
+}) {
+  const rows = report.rows;
   return (
     <div className="space-y-4">
       <div className="card p-6">
@@ -401,55 +462,41 @@ function ReturnsReportView({ rows }: { rows: ReturnsSummaryRow[] }) {
           </tbody>
         </table>
       </div>
+
+      <DetailTable
+        rows={report.details}
+        columns={RETURNS_DETAIL_COLUMNS}
+        getKey={(row: DetailRow) => row.key}
+        totals={report.detailTotals}
+        canViewProfit={canViewProfit}
+        emptyMessage="No returns in this range"
+      />
     </div>
   );
 }
 
 function LossReportView({ rows }: { rows: LossReportRow[] }) {
   return (
-    <div className="card overflow-hidden">
-      <table className="min-w-full text-sm">
-        <thead className="bg-gray-50 text-left text-gray-500 dark:bg-gray-950">
-          <tr>
-            <th className="px-4 py-3">Date</th>
-            <th className="px-4 py-3">Invoice</th>
-            <th className="px-4 py-3">Customer</th>
-            <th className="px-4 py-3">Phone</th>
-            <th className="px-4 py-3">Net price</th>
-            <th className="px-4 py-3">Type</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr key={row.id} className="border-t border-gray-100 dark:border-gray-800">
-              <td className="px-4 py-3">{new Date(row.date).toLocaleDateString()}</td>
-              <td className="px-4 py-3">{row.invoiceNumber}</td>
-              <td className="px-4 py-3">{row.customerName}</td>
-              <td className="px-4 py-3">
-                {row.categoryName} {row.modelName}
-              </td>
-              <td className="px-4 py-3">TZS {currency(row.netPrice)}</td>
-              <td className="px-4 py-3">
-                <span
-                  className={`rounded-full px-2.5 py-1 text-xs font-medium ${
-                    row.lossType === "below_buying_price" ? "bg-danger/10 text-danger" : "bg-warning/10 text-warning"
-                  }`}
-                >
-                  {row.lossTypeDisplay}
-                </span>
-              </td>
-            </tr>
-          ))}
-          {rows.length === 0 ? (
-            <tr>
-              <td colSpan={6} className="px-4 py-8 text-center text-sm text-gray-400">
-                No losses in this range
-              </td>
-            </tr>
-          ) : null}
-        </tbody>
-      </table>
-    </div>
+    <DetailTable
+      title="Sales below cost or below the minimum price"
+      rows={rows}
+      columns={LOSS_DETAIL_COLUMNS}
+      getKey={(row: LossReportRow) => row.id}
+      // This report is only reachable with view_profit (see the tab filter below).
+      canViewProfit
+      emptyMessage="No losses in this range"
+      renderCell={(column, row) =>
+        column.key === "lossTypeDisplay" ? (
+          <span
+            className={`rounded-full px-2.5 py-1 text-xs font-medium ${
+              row.lossType === "below_buying_price" ? "bg-danger/10 text-danger" : "bg-warning/10 text-warning"
+            }`}
+          >
+            {row.lossTypeDisplay}
+          </span>
+        ) : undefined
+      }
+    />
   );
 }
 
@@ -489,9 +536,9 @@ export default function ReportsPage() {
   const [paymentMethodFilter, setPaymentMethodFilter] = useState("");
 
   const [salesData, setSalesData] = useState<SalesSummaryResponse | null>(null);
-  const [stockRows, setStockRows] = useState<StockSummaryRow[]>([]);
-  const [supplierRows, setSupplierRows] = useState<SupplierSummaryRow[]>([]);
-  const [returnsRows, setReturnsRows] = useState<ReturnsSummaryRow[]>([]);
+  const [stockReport, setStockReport] = useState<ReportWithDetails<StockSummaryRow>>(EMPTY_REPORT);
+  const [supplierReport, setSupplierReport] = useState<ReportWithDetails<SupplierSummaryRow>>(EMPTY_REPORT);
+  const [returnsReport, setReturnsReport] = useState<ReportWithDetails<ReturnsSummaryRow>>(EMPTY_REPORT);
   const [lossRows, setLossRows] = useState<LossReportRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
@@ -533,11 +580,11 @@ export default function ReportsPage() {
     if (reportKind === "sales") {
       getSalesSummary(filters).then(setSalesData).catch(() => setError("Unable to load this report"));
     } else if (reportKind === "stock") {
-      getStockSummary(filters).then(setStockRows).catch(() => setError("Unable to load this report"));
+      getStockSummary(filters).then(setStockReport).catch(() => setError("Unable to load this report"));
     } else if (reportKind === "supplier") {
-      getSupplierSummary(filters).then(setSupplierRows).catch(() => setError("Unable to load this report"));
+      getSupplierSummary(filters).then(setSupplierReport).catch(() => setError("Unable to load this report"));
     } else if (reportKind === "returns") {
-      getReturnsSummary(filters).then(setReturnsRows).catch(() => setError("Unable to load this report"));
+      getReturnsSummary(filters).then(setReturnsReport).catch(() => setError("Unable to load this report"));
     } else if (reportKind === "loss") {
       getLossReport(filters).then(setLossRows).catch(() => setError("Unable to view the loss report"));
     }
@@ -765,11 +812,13 @@ export default function ReportsPage() {
           {reportKind === "sales" && salesData ? (
             <SalesReportView data={salesData} groupBy={groupBy} canViewProfit={canViewProfit} />
           ) : null}
-          {reportKind === "stock" ? <StockReportView rows={stockRows} canViewProfit={canViewProfit} /> : null}
+          {reportKind === "stock" ? <StockReportView report={stockReport} canViewProfit={canViewProfit} /> : null}
           {reportKind === "supplier" ? (
-            <SupplierReportView rows={supplierRows} canViewProfit={canViewProfit} />
+            <SupplierReportView report={supplierReport} canViewProfit={canViewProfit} />
           ) : null}
-          {reportKind === "returns" ? <ReturnsReportView rows={returnsRows} /> : null}
+          {reportKind === "returns" ? (
+            <ReturnsReportView report={returnsReport} canViewProfit={canViewProfit} />
+          ) : null}
           {reportKind === "loss" ? <LossReportView rows={lossRows} /> : null}
         </div>
       )}

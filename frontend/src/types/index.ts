@@ -223,9 +223,24 @@ export interface ReportTotals {
   profit?: number;
 }
 
-export interface SalesSummaryResponse {
+// One line of a report's full per-transaction table. Which keys exist depends on the
+// report (and profit-gated ones are absent without view_profit), so the shape is
+// described by the column config in pages/reports/DetailTable.tsx rather than a
+// per-report interface.
+export type DetailRow = { key: string } & Record<string, string | number | null>;
+
+export interface ReportDetails {
+  details: DetailRow[];
+  detailTotals: Record<string, number>;
+}
+
+export interface SalesSummaryResponse extends ReportDetails {
   rows: ReportRow[];
   totals: ReportTotals;
+}
+
+export interface ReportWithDetails<Row> extends ReportDetails {
+  rows: Row[];
 }
 
 export interface ReturnsSummaryRow {
@@ -255,10 +270,19 @@ export interface LossReportRow {
   customerName: string;
   categoryName: string;
   modelName: string;
+  supplierName: string;
   date: string;
+  time: string;
+  soldByName: string;
+  units: number;
+  priceSold: number;
+  discount: number;
   netPrice: number;
   buyingPrice: number;
   minSellingPrice: number;
+  profit: number;
+  condition: string;
+  saleNotes: string;
   lossType: "below_buying_price" | "below_minimum_price";
   lossTypeDisplay: string;
 }
