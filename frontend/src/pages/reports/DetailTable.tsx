@@ -72,6 +72,39 @@ export const STOCK_DETAIL_COLUMNS: DetailColumn[] = [
   { key: "condition", label: "Condition", kind: "note" },
 ];
 
+// Loan sales report -- summary rows (grouped) and one-line-per-loan detail. The payment
+// columns simply aren't drawn when the server leaves them out (see LoanReportRow).
+export const LOAN_SUMMARY_COLUMNS: DetailColumn[] = [
+  { key: "label", label: "Group" },
+  { key: "loans", label: "Loans", kind: "number" },
+  { key: "units", label: "Units", kind: "number" },
+  { key: "revenue", label: "Revenue", kind: "money" },
+  { key: "expectedProfit", label: "Expected profit", kind: "money", profit: true },
+  { key: "paid", label: "Paid", kind: "money" },
+  { key: "outstanding", label: "Still owed", kind: "money" },
+];
+
+export const LOAN_DETAIL_COLUMNS: DetailColumn[] = [
+  { key: "date", label: "Date", kind: "date" },
+  { key: "time", label: "Time" },
+  { key: "invoiceNumber", label: "Invoice" },
+  { key: "businessName", label: "Business" },
+  { key: "contact", label: "Contact" },
+  { key: "soldByName", label: "Salesperson" },
+  { key: "models", label: "Models", kind: "note" },
+  { key: "categories", label: "Category" },
+  { key: "suppliers", label: "Supplier" },
+  { key: "units", label: "Units", kind: "number" },
+  { key: "revenue", label: "Revenue", kind: "money" },
+  { key: "cost", label: "Cost", kind: "money", profit: true },
+  { key: "expectedProfit", label: "Expected profit", kind: "money", profit: true },
+  { key: "paid", label: "Paid", kind: "money" },
+  { key: "balance", label: "Balance", kind: "money" },
+  { key: "status", label: "Status" },
+  { key: "lastPayment", label: "Last payment", kind: "date" },
+  { key: "notes", label: "Notes", kind: "note" },
+];
+
 export const LOSS_DETAIL_COLUMNS: DetailColumn[] = [
   { key: "date", label: "Date", kind: "date" },
   { key: "time", label: "Time" },
@@ -108,6 +141,8 @@ interface DetailTableProps<Row extends object> {
   totals?: Record<string, number>;
   canViewProfit: boolean;
   emptyMessage: string;
+  // What one row is called in the "12 lines" count -- "group" for a summary table.
+  countNoun?: string;
   // Lets a report swap in richer markup for one cell (e.g. the loss-type badge).
   renderCell?: (column: DetailColumn, row: Row) => ReactNode | undefined;
 }
@@ -120,9 +155,15 @@ export function DetailTable<Row extends object>({
   totals,
   canViewProfit,
   emptyMessage,
+  countNoun = "line",
   renderCell,
 }: DetailTableProps<Row>) {
-  const visibleColumns = columns.filter((column) => canViewProfit || !column.profit);
+  // A column is drawn only if the server sent it: profit is stripped without view_profit,
+  // and payment figures are left out when they can't be worked out. (With no rows there's
+  // nothing to go by, so the empty table keeps its full set of headers.)
+  const sent = (column: DetailColumn) =>
+    rows.length === 0 || rows.some((row) => (row as Record<string, unknown>)[column.key] !== undefined);
+  const visibleColumns = columns.filter((column) => (canViewProfit || !column.profit) && sent(column));
   const showTotals = totals && rows.length > 0 && visibleColumns.some((column) => totals[column.key] !== undefined);
 
   return (
@@ -130,7 +171,7 @@ export function DetailTable<Row extends object>({
       <div className="flex items-baseline justify-between px-4 py-3">
         <h2 className="text-lg font-semibold">{title}</h2>
         <p className="text-xs text-gray-400">
-          {rows.length} {rows.length === 1 ? "line" : "lines"} · amounts in TZS
+          {rows.length} {rows.length === 1 ? countNoun : `${countNoun}s`} · amounts in TZS
         </p>
       </div>
       <div className="overflow-x-auto">

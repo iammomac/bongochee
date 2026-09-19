@@ -81,7 +81,7 @@ function RevenueTrendChart({ trend }: { trend: RevenueTrendPoint[] }) {
     <div className="h-56">
       <ResponsiveContainer width="100%" height="100%">
         <AreaChart data={trend} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-          <CartesianGrid vertical={false} stroke="#e5e7eb" strokeDasharray="0" />
+          <CartesianGrid vertical={false} stroke="var(--chart-grid)" strokeDasharray="0" />
           <XAxis
             dataKey="date"
             tickFormatter={formatTrendDate}

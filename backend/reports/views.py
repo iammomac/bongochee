@@ -11,6 +11,7 @@ from rest_framework.views import APIView
 
 from accounts.models import PasswordChangeRequest, User
 from activitylog.services import log_action
+from loans.permissions import HasAnyLoanPermission
 from rbac.permissions import HasPermission, IsAdminOrSuper, user_has_permission
 from reports import services
 from reports.exports import multi_sheet_xlsx, rows_to_pdf, rows_to_xlsx
@@ -362,6 +363,78 @@ class LossReportView(BaseReportView):
             ("sale_notes", "Sale Notes"),
         ]
         return columns, rows, None
+
+
+LOAN_GROUP_LABELS = {
+    "day": "Period", "business": "Business", "user": "Salesperson", "status": "Status",
+    "category": "Brand", "model": "Model", "supplier": "Supplier",
+}
+
+
+class LoanSalesReportView(BaseReportView):
+    """Loan sales, with the same customisation as the sales report: their own date range
+    (by the day the loan was made), a grouping, and filters -- plus business and payment
+    status, which only loans have. Needs view_reports AND a loan permission, since loan
+    data is admin/super-only unless someone has been deliberately given access."""
+
+    permission_classes = [IsAuthenticated, HasPermission, HasAnyLoanPermission]
+    export_filename = "loan_sales_report"
+    profit_fields = ("expected_profit",)
+    detail_profit_fields = ("cost", "expected_profit")
+    detail_sum_keys = ("units", "revenue", "cost", "expected_profit", "paid", "balance")
+
+    def _params(self, request):
+        date_from, date_to = _date_range(request)
+        group_by = request.query_params.get("group_by", "business")
+        if group_by not in services.LOAN_GROUPS:
+            group_by = "business"
+        status_param = request.query_params.get("status")
+        status = status_param if status_param in services.LOAN_STATUS_LABELS else None
+        filters = _filters(request)
+        filters.pop("payment_method")  # loans have no payment method of their own
+        business = (request.query_params.get("business") or "").strip() or None
+        return date_from, date_to, group_by, status, {**filters, "business": business}
+
+    def build_report(self, request):
+        date_from, date_to, group_by, status, filters = self._params(request)
+        rows, totals, payments_shown = services.loan_report_rows(
+            date_from, date_to, group_by=group_by, status=status, **filters
+        )
+        columns = [
+            ("label", LOAN_GROUP_LABELS[group_by]),
+            ("loans", "Loans"),
+            ("units", "Units"),
+            ("revenue", "Revenue"),
+            ("expected_profit", "Expected Profit"),
+        ]
+        if payments_shown:
+            columns += [("paid", "Paid"), ("outstanding", "Still Owed")]
+        return columns, rows, totals
+
+    def build_details(self, request):
+        date_from, date_to, _group_by, status, filters = self._params(request)
+        rows = services.loan_detail_rows(date_from, date_to, status=status, **filters)
+        columns = [
+            ("date", "Date"),
+            ("time", "Time"),
+            ("invoice_number", "Invoice"),
+            ("business_name", "Business"),
+            ("contact", "Contact"),
+            ("sold_by_name", "Salesperson"),
+            ("models", "Models"),
+            ("categories", "Category"),
+            ("suppliers", "Supplier"),
+            ("units", "Units"),
+            ("revenue", "Revenue"),
+            ("cost", "Cost"),
+            ("expected_profit", "Expected Profit"),
+        ]
+        # Payments belong to the whole loan, so they're left out while a product filter is
+        # narrowing which of its items are counted.
+        if not any(filters.get(name) for name in ("category", "model", "supplier")):
+            columns += [("paid", "Paid"), ("balance", "Balance")]
+        columns += [("status", "Status"), ("last_payment", "Last Payment"), ("notes", "Notes")]
+        return columns, rows
 
 
 class PersonReportView(APIView):

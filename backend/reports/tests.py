@@ -1,7 +1,8 @@
 import io
-from datetime import date
+from datetime import date, timedelta
 
 import openpyxl
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 
@@ -444,3 +445,257 @@ class FullBackupExportTests(APITestCase):
         self.client.force_authenticate(self.power_user)
         res = self.client.get("/api/v1/reports/full-backup/")
         self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN)
+
+
+class LoanSalesReportTests(APITestCase):
+    """The loan sales report: same customisation as the sales report, plus business and
+    payment status. Fixture (revenue = price - discount; profit = revenue - buying price):
+
+      A  Kariakoo   owner       today    2 x A56 @650k         rev 1,300k  profit 300k  paid 500k -> partial
+      B  Mwanza     salesman    today    1 x Redmi @400k-20k   rev   380k  profit  80k  paid   0   -> open
+      C  Kariakoo   owner       10d ago  1 x A56 @600k         rev   600k  profit 100k  paid 600k -> paid
+    """
+
+    def setUp(self):
+        from loans.models import LoanPayment, LoanSale, LoanSaleItem
+
+        perms = {
+            code: Permission.objects.create(codename=code, label=code, category="x")
+            for code in ("view_reports", "export_reports", "view_profit", "create_loan_sales")
+        }
+
+        def user_with(name, codes, n):
+            role = Role.objects.create(name=f"role-{name}")
+            role.permissions.add(*[perms[c] for c in codes])
+            return User.objects.create_user(
+                username=name, password="Str0ngPassw0rd!", phone=f"2557000009{n:02d}", role=role,
+                must_change_password=False,
+            )
+
+        self.owner = user_with("owner", perms.keys(), 1)
+        self.salesman = user_with("salesman", ("view_reports", "export_reports", "create_loan_sales"), 2)  # no view_profit
+        self.reports_only = user_with("reportsonly", ("view_reports",), 3)  # no loan permission
+        self.loan_only = user_with("loanonly", ("create_loan_sales",), 4)  # no view_reports
+
+        self.samsung = Category.objects.create(name="Samsung")
+        self.xiaomi = Category.objects.create(name="Xiaomi")
+        a56 = PhoneModel.objects.create(category=self.samsung, name="Galaxy A56")
+        redmi = PhoneModel.objects.create(category=self.xiaomi, name="Redmi 13")
+
+        def stock(category, model, supplier_name, buying):
+            batch = StockIn.objects.create(
+                supplier=Supplier.objects.create(name=supplier_name), import_date=date.today(), created_by=self.owner
+            )
+            return StockItem.objects.create(
+                stock_in=batch, category=category, model=model, quantity=20, quantity_remaining=20,
+                buying_price=buying, min_selling_price="1", max_selling_price="1",
+            )
+
+        self.a56_stock = stock(self.samsung, a56, "Blue Telecom", "500000")
+        self.redmi_stock = stock(self.xiaomi, redmi, "Green Mobile", "300000")
+
+        def loan(invoice, business, seller, items, paid=0, phone="", person=""):
+            record = LoanSale.objects.create(
+                invoice_number=invoice, business_name=business, sold_by=seller,
+                contact_person=person, contact_phone=phone, notes=f"note {invoice}",
+            )
+            for stock_item, price, discount in items:
+                LoanSaleItem.objects.create(loan_sale=record, stock_item=stock_item, selling_price=price, discount=discount)
+            if paid:
+                LoanPayment.objects.create(
+                    loan_sale=record, amount=paid, payment_method="cash", paid_date=date.today(), recorded_by=seller
+                )
+            return record
+
+        self.loan_a = loan("LOAN-A", "Kariakoo Phones", self.owner, [(self.a56_stock, "650000", 0)] * 2, 500000, "255711", "Juma")
+        self.loan_b = loan("LOAN-B", "Mwanza Mobile", self.salesman, [(self.redmi_stock, "400000", "20000")])
+        self.loan_c = loan("LOAN-C", "Kariakoo Phones", self.owner, [(self.a56_stock, "600000", 0)], 600000)
+        LoanSale.objects.filter(pk=self.loan_c.pk).update(created_at=timezone.now() - timedelta(days=10))
+
+        self.client.force_authenticate(self.owner)
+
+    URL = "/api/v1/reports/loan-sales/"
+
+    def _wide(self, **extra):
+        return {
+            "date_from": (date.today() - timedelta(days=30)).isoformat(), "date_to": date.today().isoformat(), **extra,
+        }
+
+    def _today(self, **extra):
+        return {"date_from": date.today().isoformat(), "date_to": date.today().isoformat(), **extra}
+
+    def _get(self, params):
+        res = self.client.get(self.URL, params)
+        self.assertEqual(res.status_code, status.HTTP_200_OK, res.content)
+        return res.json()
+
+    def test_needs_both_view_reports_and_a_loan_permission(self):
+        self.client.force_authenticate(self.reports_only)
+        self.assertEqual(self.client.get(self.URL, self._wide()).status_code, status.HTTP_403_FORBIDDEN)
+        self.client.force_authenticate(self.loan_only)
+        self.assertEqual(self.client.get(self.URL, self._wide()).status_code, status.HTTP_403_FORBIDDEN)
+        self.client.force_authenticate(self.salesman)
+        self.assertEqual(self.client.get(self.URL, self._wide()).status_code, status.HTTP_200_OK)
+
+    def test_grouped_by_business_shows_loans_units_revenue_profit_paid_and_owed(self):
+        body = self._get(self._wide(group_by="business"))
+        rows = {r["label"]: r for r in body["rows"]}
+        self.assertEqual([r["label"] for r in body["rows"]], ["Kariakoo Phones", "Mwanza Mobile"])  # biggest first
+        k = rows["Kariakoo Phones"]
+        self.assertEqual((k["loans"], k["units"]), (2, 3))
+        self.assertEqual(float(k["revenue"]), 1900000.0)
+        self.assertEqual(float(k["expectedProfit"]), 400000.0)
+        self.assertEqual(float(k["paid"]), 1100000.0)
+        self.assertEqual(float(k["outstanding"]), 800000.0)
+        m = rows["Mwanza Mobile"]
+        self.assertEqual((float(m["revenue"]), float(m["paid"]), float(m["outstanding"])), (380000.0, 0.0, 380000.0))
+
+        totals = body["totals"]
+        self.assertEqual((totals["loans"], totals["units"]), (3, 4))
+        self.assertEqual(float(totals["revenue"]), 2280000.0)
+        self.assertEqual(float(totals["expectedProfit"]), 480000.0)
+        self.assertEqual(float(totals["paid"]), 1100000.0)
+        self.assertEqual(float(totals["outstanding"]), 1180000.0)
+
+    def test_it_has_its_own_date_range_by_the_day_the_loan_was_made(self):
+        today = self._get(self._today())
+        self.assertEqual(today["totals"]["loans"], 2)  # C was made 10 days ago
+        self.assertEqual(len(today["details"]), 2)
+        self.assertEqual(self._get(self._wide())["totals"]["loans"], 3)
+
+    def test_groupings(self):
+        by_day = self._get(self._wide(group_by="day"))["rows"]
+        self.assertEqual(len(by_day), 2)
+        self.assertLess(by_day[0]["key"], by_day[1]["key"])  # oldest first, like the sales trend
+
+        by_status = self._get(self._wide(group_by="status"))["rows"]
+        self.assertEqual([r["label"] for r in by_status], ["Open", "Partially paid", "Paid off"])
+
+        by_user = {r["label"]: r["loans"] for r in self._get(self._wide(group_by="user"))["rows"]}
+        self.assertEqual(by_user, {"owner": 2, "salesman": 1})
+
+    def test_grouping_by_product_has_no_payment_columns_since_payments_belong_to_the_whole_loan(self):
+        for group_by, labels in (("category", {"Samsung", "Xiaomi"}), ("model", {"Galaxy A56", "Redmi 13"}),
+                                 ("supplier", {"Blue Telecom", "Green Mobile"})):
+            rows = self._get(self._wide(group_by=group_by))["rows"]
+            self.assertEqual({r["label"] for r in rows}, labels, group_by)
+            for row in rows:
+                self.assertNotIn("paid", row)
+                self.assertNotIn("outstanding", row)
+        samsung = next(r for r in self._get(self._wide(group_by="category"))["rows"] if r["label"] == "Samsung")
+        self.assertEqual((samsung["loans"], samsung["units"]), (2, 3))  # A and C both hold Samsung phones
+        self.assertEqual(float(samsung["revenue"]), 1900000.0)
+
+    def test_filters_by_status_business_and_salesperson(self):
+        open_only = self._get(self._wide(status="open"))
+        self.assertEqual([d["invoiceNumber"] for d in open_only["details"]], ["LOAN-B"])
+
+        kariakoo = self._get(self._wide(business="kariakoo"))  # case-insensitive "contains"
+        self.assertEqual(kariakoo["totals"]["loans"], 2)
+
+        mine = self._get(self._wide(user=str(self.salesman.id)))
+        self.assertEqual([d["invoiceNumber"] for d in mine["details"]], ["LOAN-B"])
+
+    def test_status_filter_still_sees_the_whole_loan_when_grouped_by_product(self):
+        rows = self._get(self._wide(status="partial", group_by="category"))["rows"]
+        self.assertEqual([r["label"] for r in rows], ["Samsung"])
+        self.assertEqual(rows[0]["units"], 2)  # loan A only
+
+    def test_a_product_filter_counts_only_matching_items_and_drops_payment_figures(self):
+        body = self._get(self._wide(category=str(self.samsung.id)))
+        self.assertEqual(body["totals"]["units"], 3)
+        self.assertEqual(float(body["totals"]["revenue"]), 1900000.0)
+        self.assertNotIn("paid", body["totals"])
+        self.assertNotIn("outstanding", body["totals"])
+        for row in body["details"]:
+            self.assertNotIn("paid", row)
+            self.assertNotIn("balance", row)
+        self.assertNotIn("paid", body["rows"][0])
+
+    def test_detail_row_has_one_line_per_loan_with_everything(self):
+        row = next(d for d in self._get(self._wide())["details"] if d["invoiceNumber"] == "LOAN-A")
+        self.assertRegex(row["time"], r"^\d{2}:\d{2}$")
+        self.assertEqual(row["businessName"], "Kariakoo Phones")
+        self.assertEqual(row["contact"], "Juma · 255711")
+        self.assertEqual(row["soldByName"], "owner")
+        self.assertEqual(row["models"], "Galaxy A56 ×2")
+        self.assertEqual(row["categories"], "Samsung")
+        self.assertEqual(row["suppliers"], "Blue Telecom")
+        self.assertEqual(row["units"], 2)
+        self.assertEqual(float(row["revenue"]), 1300000.0)
+        self.assertEqual(float(row["cost"]), 1000000.0)
+        self.assertEqual(float(row["expectedProfit"]), 300000.0)
+        self.assertEqual(float(row["paid"]), 500000.0)
+        self.assertEqual(float(row["balance"]), 800000.0)
+        self.assertEqual(row["status"], "Partially paid")
+        self.assertEqual(row["lastPayment"], date.today().isoformat())
+        self.assertEqual(row["notes"], "note LOAN-A")
+        self.assertIsNone(next(d for d in self._get(self._wide())["details"] if d["invoiceNumber"] == "LOAN-B")["lastPayment"])
+
+    def test_detail_totals_add_up_the_columns(self):
+        totals = self._get(self._wide())["detailTotals"]
+        self.assertEqual(totals["units"], 4)
+        self.assertEqual(float(totals["revenue"]), 2280000.0)
+        self.assertEqual(float(totals["paid"]), 1100000.0)
+        self.assertEqual(float(totals["balance"]), 1180000.0)
+
+    def test_cost_and_profit_are_hidden_without_view_profit(self):
+        self.client.force_authenticate(self.salesman)
+        body = self._get(self._wide())
+        self.assertNotIn("expectedProfit", body["totals"])
+        for row in body["rows"]:
+            self.assertNotIn("expectedProfit", row)
+        for row in body["details"]:
+            self.assertNotIn("cost", row)
+            self.assertNotIn("expectedProfit", row)
+        self.assertNotIn("expectedProfit", body["detailTotals"])
+        self.assertIn("revenue", body["totals"])  # revenue and payments stay visible
+
+    def test_an_overpaid_loan_has_zero_balance_and_cannot_cancel_another_loans_debt(self):
+        from loans.models import LoanPayment
+
+        LoanPayment.objects.create(
+            loan_sale=self.loan_b, amount="500000", payment_method="cash", paid_date=date.today(), recorded_by=self.owner
+        )  # B is worth 380k
+        body = self._get(self._wide(group_by="status"))
+        paid_off = next(r for r in body["rows"] if r["label"] == "Paid off")
+        self.assertEqual(paid_off["loans"], 2)
+        self.assertEqual(float(paid_off["outstanding"]), 0.0)
+        self.assertEqual(float(body["totals"]["outstanding"]), 800000.0)  # only A still owes
+
+    def test_bad_group_by_or_status_falls_back_instead_of_erroring(self):
+        body = self._get(self._wide(group_by="nonsense", status="whatever"))
+        self.assertEqual({r["label"] for r in body["rows"]}, {"Kariakoo Phones", "Mwanza Mobile"})
+        self.assertEqual(body["totals"]["loans"], 3)
+
+    def test_an_empty_range_is_an_empty_report(self):
+        body = self._get({"date_from": "2001-01-01", "date_to": "2001-01-02"})
+        self.assertEqual((body["rows"], body["details"]), ([], []))
+        self.assertEqual(body["totals"]["loans"], 0)
+
+    def test_xlsx_export_has_a_summary_and_details_sheet(self):
+        res = self.client.get(self.URL, {**self._wide(), "export": "xlsx"})
+        workbook = openpyxl.load_workbook(io.BytesIO(res.content))
+        self.assertEqual(workbook.sheetnames, ["Summary", "Details"])
+        summary_header = [c.value for c in workbook["Summary"][1]]
+        self.assertEqual(summary_header, ["Business", "Loans", "Units", "Revenue", "Expected Profit", "Paid", "Still Owed"])
+        details = list(workbook["Details"].iter_rows(values_only=True))
+        self.assertIn("Balance", details[0])
+        self.assertEqual(details[-1][0], "Total")
+
+    def test_exports_leave_out_profit_without_view_profit_and_the_pdf_renders(self):
+        self.client.force_authenticate(self.salesman)
+        res = self.client.get(self.URL, {**self._wide(), "export": "xlsx"})
+        workbook = openpyxl.load_workbook(io.BytesIO(res.content))
+        self.assertNotIn("Expected Profit", [c.value for c in workbook["Summary"][1]])
+        self.assertNotIn("Cost", [c.value for c in workbook["Details"][1]])
+        pdf = self.client.get(self.URL, {**self._wide(), "export": "pdf"})
+        self.assertEqual(pdf.status_code, status.HTTP_200_OK)
+        self.assertTrue(pdf.content.startswith(b"%PDF"))
+
+    def test_exporting_needs_export_reports(self):
+        role = self.loan_only.role
+        role.permissions.add(Permission.objects.get(codename="view_reports"))
+        self.client.force_authenticate(self.loan_only)  # can view, but may not export
+        self.assertEqual(self.client.get(self.URL, self._wide()).status_code, status.HTTP_200_OK)
+        self.assertEqual(self.client.get(self.URL, {**self._wide(), "export": "xlsx"}).status_code, 403)

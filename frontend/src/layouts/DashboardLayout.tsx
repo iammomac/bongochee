@@ -9,9 +9,12 @@ export function DashboardLayout() {
   return (
     <div className="flex min-h-screen bg-background dark:bg-gray-950">
       <Sidebar mobileOpen={mobileNavOpen} onCloseMobile={() => setMobileNavOpen(false)} />
-      <div className="flex flex-1 flex-col">
+      {/* min-w-0: a flex item never shrinks below its content's width by default, so
+          without it one wide table stretches this column -- and the whole page -- past the
+          window instead of scrolling inside its own box. */}
+      <div className="flex min-w-0 flex-1 flex-col">
         <Topbar onMenuClick={() => setMobileNavOpen(true)} />
-        <main className="flex-1 p-6">
+        <main className="min-w-0 flex-1 p-6">
           <Outlet />
         </main>
       </div>

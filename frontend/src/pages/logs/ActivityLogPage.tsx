@@ -117,7 +117,7 @@ export default function ActivityLogPage() {
 
       {error ? <div className="card p-4 text-sm text-danger">{error}</div> : null}
 
-      <div className="card overflow-hidden">
+      <div className="card table-card">
         <table className="min-w-full text-sm">
           <thead className="bg-gray-50 text-left text-gray-500 dark:bg-gray-950">
             <tr>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Database, Download, FileText, Printer } from "lucide-react";
 import { Select } from "../../components/Select";
 import {
@@ -16,6 +16,7 @@ import {
 import {
   downloadFullBackup,
   downloadReportExport,
+  getLoanSalesReport,
   getLossReport,
   getReturnsSummary,
   getSalesSummary,
@@ -29,6 +30,14 @@ import { searchSuppliers } from "../../services/suppliers";
 import { listUsers } from "../../services/users";
 import { usePermissions } from "../../hooks/usePermissions";
 import { PersonReportPanel } from "./PersonReportPanel";
+import { DateRangeControls, useDateRange } from "./DateRangeControls";
+import {
+  DEFAULT_LOAN_FILTERS,
+  EMPTY_LOAN_REPORT,
+  LoanFilterBar,
+  LoanReportView,
+  type LoanFilters,
+} from "./LoanReportView";
 import {
   DetailTable,
   LOSS_DETAIL_COLUMNS,
@@ -55,7 +64,9 @@ const compactCurrency = (value: number) =>
   new Intl.NumberFormat("en-TZ", { notation: "compact", maximumFractionDigits: 1 }).format(value);
 
 type ReportKind = ExportableReport | "person";
-type DatePreset = "today" | "week" | "month" | "custom";
+
+// Holding any of these is what gives access to loan sales anywhere in the app.
+const LOAN_PERMISSIONS = ["create_loan_sales", "edit_loan_sales", "delete_loan_sales", "record_loan_payments"] as const;
 
 const REPORT_TABS: { key: ReportKind; label: string }[] = [
   { key: "sales", label: "Sales & Profit" },
@@ -63,6 +74,7 @@ const REPORT_TABS: { key: ReportKind; label: string }[] = [
   { key: "supplier", label: "Supplier" },
   { key: "returns", label: "Returns" },
   { key: "loss", label: "Loss" },
+  { key: "loans", label: "Loan sales" },
   { key: "person", label: "Person" },
 ];
 
@@ -85,24 +97,6 @@ const RETURNS_GROUP_OPTIONS = [
 ];
 
 const EMPTY_REPORT = { rows: [], details: [], detailTotals: {} };
-
-function toIso(d: Date) {
-  return d.toISOString().slice(0, 10);
-}
-
-function presetRange(preset: DatePreset) {
-  const today = new Date();
-  if (preset === "week") {
-    const start = new Date(today);
-    start.setDate(today.getDate() - today.getDay());
-    return { from: toIso(start), to: toIso(today) };
-  }
-  if (preset === "month") {
-    const start = new Date(today.getFullYear(), today.getMonth(), 1);
-    return { from: toIso(start), to: toIso(today) };
-  }
-  return { from: toIso(today), to: toIso(today) };
-}
 
 interface TooltipEntry {
   dataKey: string;
@@ -180,7 +174,7 @@ function SalesReportView({
           <ResponsiveContainer width="100%" height="100%">
             {isTrend ? (
               <AreaChart data={data.rows} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                <CartesianGrid vertical={false} stroke="#e5e7eb" strokeDasharray="0" />
+                <CartesianGrid vertical={false} stroke="var(--chart-grid)" strokeDasharray="0" />
                 <XAxis
                   dataKey="label"
                   tick={{ fontSize: 11, fill: "#9ca3af" }}
@@ -226,7 +220,7 @@ function SalesReportView({
               </AreaChart>
             ) : (
               <BarChart data={data.rows.slice(0, 10)} margin={{ top: 8, right: 8, left: 0, bottom: 24 }}>
-                <CartesianGrid vertical={false} stroke="#e5e7eb" strokeDasharray="0" />
+                <CartesianGrid vertical={false} stroke="var(--chart-grid)" strokeDasharray="0" />
                 <XAxis
                   dataKey="label"
                   tick={{ fontSize: 11, fill: "#9ca3af" }}
@@ -252,7 +246,7 @@ function SalesReportView({
         </div>
       </div>
 
-      <div className="card overflow-hidden">
+      <div className="card table-card">
         <table className="min-w-full text-sm">
           <thead className="bg-gray-50 text-left text-gray-500 dark:bg-gray-950">
             <tr>
@@ -305,7 +299,7 @@ function StockReportView({
 }) {
   return (
     <div className="space-y-4">
-      <div className="card overflow-hidden">
+      <div className="card table-card">
         <table className="min-w-full text-sm">
           <thead className="bg-gray-50 text-left text-gray-500 dark:bg-gray-950">
             <tr>
@@ -356,7 +350,7 @@ function SupplierReportView({
 }) {
   return (
     <div className="space-y-4">
-      <div className="card overflow-hidden">
+      <div className="card table-card">
         <table className="min-w-full text-sm">
           <thead className="bg-gray-50 text-left text-gray-500 dark:bg-gray-950">
             <tr>
@@ -413,7 +407,7 @@ function ReturnsReportView({
         <div className="h-64">
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={rows.slice(0, 10)} margin={{ top: 8, right: 8, left: 0, bottom: 24 }}>
-              <CartesianGrid vertical={false} stroke="#e5e7eb" strokeDasharray="0" />
+              <CartesianGrid vertical={false} stroke="var(--chart-grid)" strokeDasharray="0" />
               <XAxis
                 dataKey="label"
                 tick={{ fontSize: 11, fill: "#9ca3af" }}
@@ -437,7 +431,7 @@ function ReturnsReportView({
           </ResponsiveContainer>
         </div>
       </div>
-      <div className="card overflow-hidden">
+      <div className="card table-card">
         <table className="min-w-full text-sm">
           <thead className="bg-gray-50 text-left text-gray-500 dark:bg-gray-950">
             <tr>
@@ -520,10 +514,21 @@ export default function ReportsPage() {
   };
 
   const [reportKind, setReportKind] = useState<ReportKind>("sales");
-  const [datePreset, setDatePreset] = useState<DatePreset>("today");
-  const [dateFrom, setDateFrom] = useState(() => presetRange("today").from);
-  const [dateTo, setDateTo] = useState(() => presetRange("today").to);
+  // The Sales/Stock/Supplier/Returns/Loss/Person tabs share this range; the loan sales report
+  // has its own (below), so setting one never changes the other.
+  const dates = useDateRange("today");
+  const dateFrom = dates.from;
+  const dateTo = dates.to;
   const [groupBy, setGroupBy] = useState("day");
+
+  const canSeeLoans = has([...LOAN_PERMISSIONS]);
+  const loanDates = useDateRange("month");
+  const [loanFilters, setLoanFilters] = useState<LoanFilters>(DEFAULT_LOAN_FILTERS);
+  const [loanReport, setLoanReport] = useState(EMPTY_LOAN_REPORT);
+  const patchLoanFilters = useCallback(
+    (patch: Partial<LoanFilters>) => setLoanFilters((prev) => ({ ...prev, ...patch })),
+    [],
+  );
 
   const [categories, setCategories] = useState<Category[]>([]);
   const [models, setModels] = useState<PhoneModel[]>([]);
@@ -551,13 +556,6 @@ export default function ReportsPage() {
   }, []);
 
   useEffect(() => {
-    if (datePreset === "custom") return;
-    const range = presetRange(datePreset);
-    setDateFrom(range.from);
-    setDateTo(range.to);
-  }, [datePreset]);
-
-  useEffect(() => {
     setGroupBy(reportKind === "sales" ? "day" : "category");
   }, [reportKind]);
 
@@ -574,6 +572,29 @@ export default function ReportsPage() {
     }),
     [dateFrom, dateTo, categoryFilter, modelFilter, supplierFilter, userFilter, paymentMethodFilter, groupBy],
   );
+
+  const loanReportFilters: ReportFilters = useMemo(
+    () => ({
+      dateFrom: loanDates.from,
+      dateTo: loanDates.to,
+      groupBy: loanFilters.groupBy,
+      business: loanFilters.business || undefined,
+      status: loanFilters.status || undefined,
+      category: loanFilters.category || undefined,
+      model: loanFilters.model || undefined,
+      supplier: loanFilters.supplier || undefined,
+      user: loanFilters.user || undefined,
+    }),
+    [loanDates.from, loanDates.to, loanFilters],
+  );
+
+  useEffect(() => {
+    if (reportKind !== "loans") return;
+    setError(null);
+    getLoanSalesReport(loanReportFilters)
+      .then(setLoanReport)
+      .catch(() => setError("Unable to load the loan sales report"));
+  }, [reportKind, loanReportFilters]);
 
   useEffect(() => {
     setError(null);
@@ -595,7 +616,7 @@ export default function ReportsPage() {
     setExporting(true);
     setError(null);
     try {
-      await downloadReportExport(reportKind, filters, format);
+      await downloadReportExport(reportKind, reportKind === "loans" ? loanReportFilters : filters, format);
     } catch {
       setError("Unable to export this report");
     } finally {
@@ -670,7 +691,9 @@ export default function ReportsPage() {
       {backupError ? <div className="no-print card p-4 text-sm text-danger">{backupError}</div> : null}
 
       <div className="no-print flex flex-wrap gap-2 border-b border-gray-100 pb-2 dark:border-gray-800">
-        {REPORT_TABS.filter((tab) => tab.key !== "loss" || canViewProfit).map((tab) => (
+        {REPORT_TABS.filter(
+          (tab) => (tab.key !== "loss" || canViewProfit) && (tab.key !== "loans" || canSeeLoans),
+        ).map((tab) => (
           <button
             key={tab.key}
             type="button"
@@ -692,38 +715,19 @@ export default function ReportsPage() {
         <PersonReportPanel dateFrom={dateFrom} dateTo={dateTo} />
       ) : (
         <div className="printable space-y-6">
+          {reportKind === "loans" ? (
+            <LoanFilterBar
+              range={loanDates}
+              filters={loanFilters}
+              onChange={patchLoanFilters}
+              categories={categories}
+              models={models}
+              suppliers={suppliers}
+              users={users}
+            />
+          ) : (
           <div className="card no-print flex flex-wrap items-end gap-3 p-4">
-            <div className="w-44">
-              <label className="mb-1 block text-xs font-medium text-gray-500">Date range</label>
-              <Select value={datePreset} onChange={(v) => setDatePreset(v as DatePreset)}>
-                <option value="today">Today</option>
-                <option value="week">This week</option>
-                <option value="month">This month</option>
-                <option value="custom">Custom</option>
-              </Select>
-            </div>
-            {datePreset === "custom" ? (
-              <>
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-gray-500">From</label>
-                  <input
-                    type="date"
-                    value={dateFrom}
-                    onChange={(e) => setDateFrom(e.target.value)}
-                    className="rounded-xl border border-gray-200 px-3 py-2 text-sm dark:border-gray-800 dark:bg-gray-950"
-                  />
-                </div>
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-gray-500">To</label>
-                  <input
-                    type="date"
-                    value={dateTo}
-                    onChange={(e) => setDateTo(e.target.value)}
-                    className="rounded-xl border border-gray-200 px-3 py-2 text-sm dark:border-gray-800 dark:bg-gray-950"
-                  />
-                </div>
-              </>
-            ) : null}
+            <DateRangeControls range={dates} />
 
             {reportKind === "sales" || reportKind === "stock" || reportKind === "returns" ? (
               <div className="w-44">
@@ -808,6 +812,11 @@ export default function ReportsPage() {
               </div>
             ) : null}
           </div>
+          )}
+
+          {reportKind === "loans" ? (
+            <LoanReportView report={loanReport} groupBy={loanFilters.groupBy} canViewProfit={canViewProfit} />
+          ) : null}
 
           {reportKind === "sales" && salesData ? (
             <SalesReportView data={salesData} groupBy={groupBy} canViewProfit={canViewProfit} />

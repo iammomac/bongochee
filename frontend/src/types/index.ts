@@ -380,3 +380,31 @@ export interface NotePerson {
   id: string;
   name: string;
 }
+
+// Loan sales report. Payment figures (paid / outstanding) are absent when they can't be
+// worked out -- grouping or filtering by product, since payments belong to the whole loan --
+// and expectedProfit is absent without view_profit.
+export interface LoanReportRow {
+  key: string;
+  label: string;
+  loans: number;
+  units: number;
+  revenue: number;
+  expectedProfit?: number;
+  paid?: number;
+  outstanding?: number;
+}
+
+export interface LoanReportTotals {
+  loans: number;
+  units: number;
+  revenue: number;
+  expectedProfit?: number;
+  paid?: number;
+  outstanding?: number;
+}
+
+export interface LoanSalesReportResponse extends ReportDetails {
+  rows: LoanReportRow[];
+  totals: LoanReportTotals;
+}

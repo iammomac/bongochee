@@ -8,11 +8,9 @@ from rest_framework.response import Response
 from activitylog.services import log_action
 from loans import services
 from loans.models import LoanPayment, LoanSale, LoanSaleItem
+from loans.permissions import ANY_LOAN_PERMISSION
 from loans.serializers import LoanPaymentSerializer, LoanSaleSerializer
 from rbac.permissions import HasPermission, user_has_permission
-
-# Anyone who can do anything with loan sales can see how the loan book is doing.
-ANY_LOAN_PERMISSION = ("create_loan_sales", "edit_loan_sales", "delete_loan_sales", "record_loan_payments")
 
 
 class LoanSaleViewSet(viewsets.ModelViewSet):

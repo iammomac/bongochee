@@ -32,6 +32,13 @@
   .card {
     @apply rounded-[28px] border border-gray-100/80 bg-white shadow-card dark:border-gray-800 dark:bg-gray-900;
   }
+
+  /* A card that holds a table: rounded corners still clip it, but a table wider than the
+     card scrolls sideways inside the card instead of being cut off (or, worse, stretching
+     the whole page). */
+  .table-card {
+    @apply overflow-x-auto;
+  }
 }
 
 @media print {

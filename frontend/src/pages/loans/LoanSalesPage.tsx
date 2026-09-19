@@ -670,7 +670,7 @@ export default function LoanSalesPage() {
         </form>
       ) : null}
 
-      <div className="card overflow-hidden">
+      <div className="card table-card">
         <table className="min-w-full text-sm">
           <thead className="bg-gray-50 text-left text-gray-500 dark:bg-gray-950">
             <tr>

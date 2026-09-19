@@ -223,8 +223,10 @@ export function Topbar({ onMenuClick }: TopbarProps) {
   const time = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
   const date = `${pad(now.getDate())}/${pad(now.getMonth() + 1)}/${pad(now.getFullYear() % 100)}`;
   return (
-    <header className="flex items-center justify-between px-6 py-4">
-      <div className="flex items-center gap-3">
+    <header className="flex items-center justify-between gap-2 px-4 py-4 sm:px-6">
+      {/* min-w-0 + truncate: on a phone the greeting gives way (it ellipsizes) instead of
+          pushing the buttons off the right edge. */}
+      <div className="flex min-w-0 items-center gap-3">
         <button
           type="button"
           onClick={onMenuClick}
@@ -233,8 +235,8 @@ export function Topbar({ onMenuClick }: TopbarProps) {
         >
           <Menu size={18} />
         </button>
-        <div className="rounded-2xl bg-white px-4 py-2 shadow-neu dark:bg-gray-900 dark:shadow-neu-dark">
-          <p className="text-sm font-medium text-gray-700 dark:text-gray-200">
+        <div className="min-w-0 rounded-2xl bg-white px-4 py-2 shadow-neu dark:bg-gray-900 dark:shadow-neu-dark">
+          <p className="truncate text-sm font-medium text-gray-700 dark:text-gray-200">
             {/* fullName is "" (not null) for accounts with no first/last name set,
                 e.g. the seeded super/admin accounts -- "??" only falls back on
                 null/undefined, so username is the real fallback here. */}
@@ -245,7 +247,7 @@ export function Topbar({ onMenuClick }: TopbarProps) {
           </p>
         </div>
       </div>
-      <div className="flex items-center gap-4">
+      <div className="flex shrink-0 items-center gap-2 sm:gap-4">
         <NotificationBell />
         <PasswordRequestButton />
         <button

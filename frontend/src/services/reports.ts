@@ -1,5 +1,6 @@
 import { api } from "./api";
 import type {
+  LoanSalesReportResponse,
   LossReportRow,
   PersonReport,
   ReportWithDetails,
@@ -21,6 +22,9 @@ export interface ReportFilters {
   user?: string;
   paymentMethod?: string;
   groupBy?: string;
+  // Loan sales report only.
+  business?: string;
+  status?: string;
 }
 
 function toParams(filters: ReportFilters, extra?: Record<string, string>) {
@@ -33,6 +37,8 @@ function toParams(filters: ReportFilters, extra?: Record<string, string>) {
   if (filters.user) params.user = filters.user;
   if (filters.paymentMethod) params.payment_method = filters.paymentMethod;
   if (filters.groupBy) params.group_by = filters.groupBy;
+  if (filters.business) params.business = filters.business;
+  if (filters.status) params.status = filters.status;
   return params;
 }
 
@@ -67,12 +73,17 @@ export async function getLossReport(filters: ReportFilters) {
   return data.rows;
 }
 
+export async function getLoanSalesReport(filters: ReportFilters) {
+  const { data } = await api.get<LoanSalesReportResponse>("/reports/loan-sales/", { params: toParams(filters) });
+  return data;
+}
+
 export async function getPersonReport(userId: string, filters: ReportFilters) {
   const { data } = await api.get<PersonReport>(`/reports/person/${userId}/`, { params: toParams(filters) });
   return data;
 }
 
-export type ExportableReport = "sales" | "returns" | "stock" | "supplier" | "loss";
+export type ExportableReport = "sales" | "returns" | "stock" | "supplier" | "loss" | "loans";
 
 const EXPORT_ENDPOINTS: Record<ExportableReport, string> = {
   sales: "/reports/sales-summary/",
@@ -80,6 +91,7 @@ const EXPORT_ENDPOINTS: Record<ExportableReport, string> = {
   stock: "/reports/stock-summary/",
   supplier: "/reports/supplier-summary/",
   loss: "/reports/loss/",
+  loans: "/reports/loan-sales/",
 };
 
 export async function downloadReportExport(

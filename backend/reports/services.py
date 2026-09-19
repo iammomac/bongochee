@@ -2,13 +2,17 @@
 thin configuration of one of the functions below (a group_by + date range + filters),
 not a separately-implemented query — see reports/views.py for how they're wired up."""
 
+from collections import Counter
+from decimal import Decimal
+
 from django.contrib.auth import get_user_model
-from django.db.models import Count, F, Sum
+from django.db.models import Count, F, Max, Sum
 from django.db.models.functions import TruncDate
 from django.utils import timezone
 
 from activitylog.models import ActivityLog
 from catalog.models import Category, PhoneModel
+from loans.models import LoanPayment, LoanSaleItem
 from rbac.models import Role
 from returns_app.models import Return
 from sales.models import Sale, SaleItem
@@ -368,6 +372,208 @@ def supplier_rows(date_from, date_to, supplier=None):
         }
         for row in grouped
     ]
+
+
+LOAN_STATUS_LABELS = {"open": "Open", "partial": "Partially paid", "paid": "Paid off"}
+LOAN_STATUS_ORDER = ("open", "partial", "paid")
+
+# Groupings that split a loan across products (a loan of two models is in both groups), so
+# payments -- which belong to the whole loan -- can't be shown against them.
+LOAN_PRODUCT_GROUPS = {
+    "category": ("stock_item__category_id", "stock_item__category__name"),
+    "model": ("stock_item__model_id", "stock_item__model__name"),
+    "supplier": ("stock_item__stock_in__supplier_id", "stock_item__stock_in__supplier__name"),
+}
+LOAN_GROUPS = ("day", "business", "user", "status") + tuple(LOAN_PRODUCT_GROUPS)
+
+
+def loan_status(total, paid):
+    if total > 0 and paid >= total:
+        return "paid"
+    return "partial" if paid > 0 else "open"
+
+
+def filtered_loan_items(date_from, date_to, category=None, model=None, supplier=None, user=None, business=None):
+    qs = LoanSaleItem.objects.filter(
+        loan_sale__created_at__date__gte=date_from, loan_sale__created_at__date__lte=date_to
+    ).select_related(
+        "loan_sale__sold_by", "stock_item__category", "stock_item__model", "stock_item__stock_in__supplier"
+    )
+    if category:
+        qs = qs.filter(stock_item__category_id=category)
+    if model:
+        qs = qs.filter(stock_item__model_id=model)
+    if supplier:
+        qs = qs.filter(stock_item__stock_in__supplier_id=supplier)
+    if user:
+        qs = qs.filter(loan_sale__sold_by_id=user)
+    if business:
+        qs = qs.filter(loan_sale__business_name__icontains=business)
+    return qs
+
+
+def loan_facts(date_from, date_to, status=None, **filters):
+    """One dict per loan sale made in the range, newest first. Units/revenue/cost cover the
+    items that match any product filter (category/model/supplier); paid, balance and
+    status always describe the whole loan, since payments aren't split by product."""
+    items = list(filtered_loan_items(date_from, date_to, **filters).order_by("-loan_sale__created_at"))
+    loan_ids = {item.loan_sale_id for item in items}
+
+    whole_loan_total = {
+        row["loan_sale_id"]: row["total"] or Decimal("0")
+        for row in LoanSaleItem.objects.filter(loan_sale_id__in=loan_ids)
+        .values("loan_sale_id")
+        .annotate(total=Sum(NET_PRICE))
+    }
+    payments = {
+        row["loan_sale_id"]: (row["paid"] or Decimal("0"), row["last"])
+        for row in LoanPayment.objects.filter(loan_sale_id__in=loan_ids)
+        .values("loan_sale_id")
+        .annotate(paid=Sum("amount"), last=Max("paid_date"))
+    }
+
+    facts = {}
+    for item in items:
+        loan = item.loan_sale
+        fact = facts.get(loan.id)
+        if fact is None:
+            fact = facts[loan.id] = {
+                "loan": loan, "units": 0, "revenue": Decimal("0"), "cost": Decimal("0"),
+                "models": Counter(), "categories": set(), "suppliers": set(),
+            }
+        fact["units"] += 1
+        fact["revenue"] += item.selling_price - item.discount
+        fact["cost"] += item.stock_item.buying_price
+        fact["models"][item.stock_item.model.name] += 1
+        fact["categories"].add(item.stock_item.category.name)
+        fact["suppliers"].add(item.stock_item.stock_in.supplier.name)
+
+    result = []
+    for loan_id, fact in facts.items():
+        total = whole_loan_total.get(loan_id, Decimal("0"))
+        paid, last_payment = payments.get(loan_id, (Decimal("0"), None))
+        fact.update(
+            paid=paid,
+            balance=max(total - paid, Decimal("0")),
+            status=loan_status(total, paid),
+            last_payment=last_payment,
+        )
+        if status is None or fact["status"] == status:
+            result.append(fact)
+    return result
+
+
+def _loan_group_key(fact, group_by):
+    loan = fact["loan"]
+    if group_by == "day":
+        day = timezone.localtime(loan.created_at).date()
+        return day.isoformat(), day.strftime("%d %b %Y")
+    if group_by == "business":
+        name = loan.business_name.strip()
+        return name.lower(), name
+    if group_by == "user":
+        return str(loan.sold_by_id), _person_name(loan.sold_by.first_name, loan.sold_by.last_name, loan.sold_by.username)
+    return fact["status"], LOAN_STATUS_LABELS[fact["status"]]  # "status"
+
+
+def loan_report_rows(date_from, date_to, group_by="business", status=None, **filters):
+    """(rows, totals, payments_shown). Loans grouped by day / business / salesperson / status
+    carry paid and still-owed figures; grouped by product they can't (see LOAN_PRODUCT_GROUPS),
+    and neither can any grouping while a product filter narrows which items are counted."""
+    facts = loan_facts(date_from, date_to, status=status, **filters)
+    product_filtered = any(filters.get(name) for name in ("category", "model", "supplier"))
+    payments_shown = not product_filtered
+
+    totals = {
+        "loans": len(facts),
+        "units": sum(f["units"] for f in facts),
+        "revenue": sum((f["revenue"] for f in facts), Decimal("0")),
+        "expected_profit": sum((f["revenue"] - f["cost"] for f in facts), Decimal("0")),
+    }
+    if payments_shown:
+        totals["paid"] = sum((f["paid"] for f in facts), Decimal("0"))
+        totals["outstanding"] = sum((f["balance"] for f in facts), Decimal("0"))
+
+    if group_by in LOAN_PRODUCT_GROUPS:
+        id_field, label_field = LOAN_PRODUCT_GROUPS[group_by]
+        grouped = (
+            filtered_loan_items(date_from, date_to, **filters)
+            .filter(loan_sale_id__in=[f["loan"].id for f in facts])
+            .values(id_field, label_field)
+            .annotate(
+                loans=Count("loan_sale", distinct=True), units=Count("id"),
+                revenue=Sum(NET_PRICE), cost=Sum("stock_item__buying_price"),
+            )
+            .order_by("-revenue")
+        )
+        rows = [
+            {
+                "key": str(row[id_field]), "label": str(row[label_field]), "loans": row["loans"], "units": row["units"],
+                "revenue": row["revenue"] or 0, "expected_profit": (row["revenue"] or 0) - (row["cost"] or 0),
+            }
+            for row in grouped
+        ]
+        return rows, totals, False
+
+    groups = {}
+    for fact in facts:
+        key, label = _loan_group_key(fact, group_by)
+        g = groups.setdefault(
+            key,
+            {"key": key, "label": label, "loans": 0, "units": 0, "revenue": Decimal("0"),
+             "expected_profit": Decimal("0"), "paid": Decimal("0"), "outstanding": Decimal("0")},
+        )
+        g["loans"] += 1
+        g["units"] += fact["units"]
+        g["revenue"] += fact["revenue"]
+        g["expected_profit"] += fact["revenue"] - fact["cost"]
+        g["paid"] += fact["paid"]
+        g["outstanding"] += fact["balance"]
+
+    rows = list(groups.values())
+    if group_by == "day":
+        rows.sort(key=lambda r: r["key"])
+    elif group_by == "status":
+        rows.sort(key=lambda r: LOAN_STATUS_ORDER.index(r["key"]))
+    else:
+        rows.sort(key=lambda r: r["revenue"], reverse=True)
+    if not payments_shown:
+        for row in rows:
+            del row["paid"], row["outstanding"]
+    return rows, totals, payments_shown
+
+
+def loan_detail_rows(date_from, date_to, status=None, **filters):
+    """One row per loan sale -- who, when, what, and where the money stands."""
+    product_filtered = any(filters.get(name) for name in ("category", "model", "supplier"))
+    rows = []
+    for fact in loan_facts(date_from, date_to, status=status, **filters):
+        loan = fact["loan"]
+        date_str, time_str = _local_date_time(loan.created_at)
+        row = {
+            "key": str(loan.id),
+            "date": date_str,
+            "time": time_str,
+            "invoice_number": loan.invoice_number,
+            "business_name": loan.business_name,
+            "contact": " · ".join(part for part in (loan.contact_person, loan.contact_phone) if part),
+            "sold_by_name": _person_name(loan.sold_by.first_name, loan.sold_by.last_name, loan.sold_by.username),
+            "models": ", ".join(f"{name} ×{count}" if count > 1 else name for name, count in sorted(fact["models"].items())),
+            "categories": ", ".join(sorted(fact["categories"])),
+            "suppliers": ", ".join(sorted(fact["suppliers"])),
+            "units": fact["units"],
+            "revenue": fact["revenue"],
+            "cost": fact["cost"],
+            "expected_profit": fact["revenue"] - fact["cost"],
+            "status": LOAN_STATUS_LABELS[fact["status"]],
+            "last_payment": fact["last_payment"].isoformat() if fact["last_payment"] else None,
+            "notes": loan.notes,
+        }
+        if not product_filtered:
+            row["paid"] = fact["paid"]
+            row["balance"] = fact["balance"]
+        rows.append(row)
+    return rows
 
 
 LOSS_TYPE_LABELS = {
