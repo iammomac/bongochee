@@ -3,6 +3,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Banknote, HandCoins, Pencil, PlusCircle, Trash2, X } from "lucide-react";
+import { LoanCharts } from "../../components/LoanCharts";
 import { PhoneEntryPanel, netPrice, type CartLine } from "../../components/PhoneEntryPanel";
 import { Select } from "../../components/Select";
 import {
@@ -190,6 +191,29 @@ function LoanDetailModal({ loan, onClose, onChanged, canEdit, canDelete, canReco
             <p className="text-xs text-gray-400">Balance</p>
             <p className="font-semibold text-danger">TZS {currency(loan.balance)}</p>
           </div>
+        </div>
+
+        {/* Cost and expected profit only arrive for users with view_profit, so their
+            absence (not a permission check here) is what hides them. */}
+        <div className="mb-4 flex gap-3 rounded-2xl bg-background p-3 text-center dark:bg-gray-950">
+          <div className="flex-1">
+            <p className="text-xs text-gray-400">Revenue</p>
+            <p className="font-semibold">TZS {currency(loan.revenue)}</p>
+          </div>
+          {loan.cost !== undefined ? (
+            <div className="flex-1">
+              <p className="text-xs text-gray-400">Cost of phones</p>
+              <p className="font-semibold">TZS {currency(loan.cost)}</p>
+            </div>
+          ) : null}
+          {loan.expectedProfit !== undefined ? (
+            <div className="flex-1">
+              <p className="text-xs text-gray-400">Expected profit</p>
+              <p className={`font-semibold ${loan.expectedProfit >= 0 ? "text-success" : "text-danger"}`}>
+                TZS {currency(loan.expectedProfit)}
+              </p>
+            </div>
+          ) : null}
         </div>
 
         <div className="mb-4 space-y-3">
@@ -469,6 +493,10 @@ export default function LoanSalesPage() {
   const [serverError, setServerError] = useState<string | null>(null);
   const [loans, setLoans] = useState<LoanSale[]>([]);
   const [selectedLoan, setSelectedLoan] = useState<LoanSale | null>(null);
+  const [chartDays, setChartDays] = useState("14");
+  // Bumped whenever a loan or payment changes, so the chart above never lags the table below.
+  const [chartRefresh, setChartRefresh] = useState(0);
+  const refreshChart = () => setChartRefresh((n) => n + 1);
 
   const {
     register,
@@ -515,6 +543,7 @@ export default function LoanSalesPage() {
       setCart([]);
       reset(defaultHeaderValues());
       loadLoans();
+      refreshChart();
     } catch (err) {
       setServerError(extractErrorMessage(err, "Unable to complete this loan sale"));
     }
@@ -535,6 +564,17 @@ export default function LoanSalesPage() {
       </div>
 
       {serverError ? <div className="card p-4 text-sm text-danger">{serverError}</div> : null}
+
+      <div className="w-44">
+        <label className="mb-1 block text-xs font-medium text-gray-500">Chart period</label>
+        <Select value={chartDays} onChange={setChartDays}>
+          <option value="7">Last 7 days</option>
+          <option value="14">Last 14 days</option>
+          <option value="30">Last 30 days</option>
+          <option value="90">Last 90 days</option>
+        </Select>
+      </div>
+      <LoanCharts days={Number(chartDays)} refreshKey={chartRefresh} showLoansPerDay />
 
       {canCreate ? (
         <form onSubmit={handleSubmit(onSubmit)} className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
@@ -688,8 +728,12 @@ export default function LoanSalesPage() {
           onChanged={(updated) => {
             setSelectedLoan(updated);
             setLoans((prev) => prev.map((l) => (l.id === updated.id ? updated : l)));
+            refreshChart();
           }}
-          onDeleted={loadLoans}
+          onDeleted={() => {
+            loadLoans();
+            refreshChart();
+          }}
           canEdit={canEdit}
           canDelete={canDelete}
           canRecordPayment={canRecordPayment}

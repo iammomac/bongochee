@@ -164,7 +164,35 @@ export interface LoanSale {
   totalPaid: number;
   balance: number;
   loanStatus: LoanStatus;
+  // What the sale is worth once fully paid (price less discount).
+  revenue: number;
+  // Cost and expected profit are only sent to users with view_profit.
+  cost?: number;
+  expectedProfit?: number;
   createdAt: string;
+}
+
+export interface LoanTrendPoint {
+  date: string;
+  loans: number;
+  units: number;
+  revenue: number;
+  expectedProfit?: number;
+}
+
+export interface LoanSummary {
+  days: number;
+  trend: LoanTrendPoint[];
+  totals: { loans: number; units: number; revenue: number; expectedProfit?: number };
+  // The whole loan book, independent of the chart's day window.
+  receivables: {
+    total: number;
+    paid: number;
+    owed: number;
+    loansOpen: number;
+    loansPartial: number;
+    loansPaid: number;
+  };
 }
 
 export type ReturnCategory =

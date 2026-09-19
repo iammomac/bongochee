@@ -15,6 +15,14 @@
       sans-serif;
   }
 
+  /* Chart gridlines: a hairline just off the surface in each theme, so they stay recessive. */
+  :root {
+    --chart-grid: #e5e7eb;
+  }
+  :root.dark {
+    --chart-grid: #2c2c2a;
+  }
+
   body {
     @apply min-h-screen bg-background text-gray-900 antialiased transition-colors dark:bg-gray-950 dark:text-gray-100;
   }

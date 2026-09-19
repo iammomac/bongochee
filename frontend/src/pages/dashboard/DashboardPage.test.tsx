@@ -4,10 +4,12 @@ import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import DashboardPage from "./DashboardPage";
 import * as dashboardService from "../../services/dashboard";
+import * as loansService from "../../services/loans";
 import { usePermissions } from "../../hooks/usePermissions";
 import type { DashboardSummary } from "../../services/dashboard";
 
 vi.mock("../../services/dashboard");
+vi.mock("../../services/loans");
 vi.mock("../../hooks/usePermissions");
 
 const mockNavigate = vi.fn();
@@ -44,6 +46,31 @@ describe("DashboardPage priority items", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(usePermissions).mockReturnValue({ has: () => false, isAdminOrSuper: false });
+    vi.mocked(loansService.getLoanSummary).mockResolvedValue({
+      days: 14,
+      trend: [],
+      totals: { loans: 2, units: 3, revenue: 1500000 },
+      receivables: { total: 1500000, paid: 500000, owed: 1000000, loansOpen: 1, loansPartial: 1, loansPaid: 0 },
+    });
+  });
+
+  it("shows the loan sales chart to someone with a loan permission", async () => {
+    vi.mocked(usePermissions).mockReturnValue({ has: () => true, isAdminOrSuper: true });
+    vi.mocked(dashboardService.getDashboardSummary).mockResolvedValue(baseSummary());
+    renderDashboard();
+
+    expect(await screen.findByText("Loans made")).toBeInTheDocument();
+    expect(screen.getByText("TZS 1,500,000")).toBeInTheDocument();
+    expect(loansService.getLoanSummary).toHaveBeenCalledWith(14);
+  });
+
+  it("leaves the loan sales chart off the dashboard without any loan permission", async () => {
+    vi.mocked(dashboardService.getDashboardSummary).mockResolvedValue(baseSummary());
+    renderDashboard();
+
+    await screen.findByText(/all caught up/i);
+    expect(screen.queryByText("Loans made")).not.toBeInTheDocument();
+    expect(loansService.getLoanSummary).not.toHaveBeenCalled();
   });
 
   it("shows 'all caught up' when nothing needs attention", async () => {

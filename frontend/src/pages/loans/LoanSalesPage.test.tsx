@@ -1,15 +1,20 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import LoanSalesPage from "./LoanSalesPage";
 import * as loansService from "../../services/loans";
 import * as salesService from "../../services/sales";
 import { usePermissions } from "../../hooks/usePermissions";
-import type { AvailablePhone, LoanSale } from "../../types";
+import type { AvailablePhone, LoanSale, LoanSummary } from "../../types";
 
 vi.mock("../../services/loans");
 vi.mock("../../services/sales");
 vi.mock("../../hooks/usePermissions");
+
+// The details window, so its labels aren't confused with the chart's own (which also
+// says "Revenue" and "Expected profit").
+const detailsWindow = () =>
+  within(screen.getByRole("heading", { name: /loan sale — loan-1/i }).closest("div.relative") as HTMLElement);
 
 const phone: AvailablePhone = {
   id: "stock-1",
@@ -54,15 +59,26 @@ function makeLoan(overrides: Partial<LoanSale> = {}): LoanSale {
     totalPaid: 0,
     balance: 650000,
     loanStatus: "open",
+    revenue: 650000,
+    cost: 500000,
+    expectedProfit: 150000,
     createdAt: "2026-01-01T00:00:00Z",
     ...overrides,
   };
 }
 
+const emptySummary: LoanSummary = {
+  days: 14,
+  trend: [],
+  totals: { loans: 0, units: 0, revenue: 0, expectedProfit: 0 },
+  receivables: { total: 0, paid: 0, owed: 0, loansOpen: 0, loansPartial: 0, loansPaid: 0 },
+};
+
 describe("LoanSalesPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(loansService.listLoanSales).mockResolvedValue([]);
+    vi.mocked(loansService.getLoanSummary).mockResolvedValue(emptySummary);
     vi.mocked(salesService.searchAvailableStock).mockResolvedValue([phone]);
     vi.mocked(usePermissions).mockReturnValue({
       has: () => true,
@@ -133,6 +149,48 @@ describe("LoanSalesPage", () => {
         ),
       );
       expect((await screen.findAllByText("Partially paid")).length).toBeGreaterThan(0);
+    });
+
+    it("shows the loan's revenue, cost and expected profit", async () => {
+      const user = userEvent.setup();
+      render(<LoanSalesPage />);
+
+      await user.click(await screen.findByRole("button", { name: /details/i }));
+
+      const details = detailsWindow();
+      expect(details.getByText("Revenue")).toBeInTheDocument();
+      expect(details.getByText("Cost of phones")).toBeInTheDocument();
+      expect(details.getByText("Expected profit")).toBeInTheDocument();
+      expect(details.getByText("TZS 500,000")).toBeInTheDocument();
+      expect(details.getByText("TZS 150,000")).toBeInTheDocument();
+    });
+
+    it("shows revenue but no cost or profit when the server withholds them (no view_profit)", async () => {
+      vi.mocked(loansService.listLoanSales).mockResolvedValue([
+        makeLoan({ cost: undefined, expectedProfit: undefined }),
+      ]);
+      const user = userEvent.setup();
+      render(<LoanSalesPage />);
+
+      await user.click(await screen.findByRole("button", { name: /details/i }));
+
+      const details = detailsWindow();
+      expect(details.getByText("Revenue")).toBeInTheDocument();
+      expect(details.queryByText("Cost of phones")).not.toBeInTheDocument();
+      expect(details.queryByText("Expected profit")).not.toBeInTheDocument();
+    });
+
+    it("refreshes the chart after a payment is recorded", async () => {
+      vi.mocked(loansService.addLoanPayment).mockResolvedValue(makeLoan({ totalPaid: 1000, balance: 649000 }));
+      const user = userEvent.setup();
+      render(<LoanSalesPage />);
+      await waitFor(() => expect(loansService.getLoanSummary).toHaveBeenCalledTimes(1));
+
+      await user.click(await screen.findByRole("button", { name: /details/i }));
+      await user.type(screen.getByPlaceholderText("0"), "1000");
+      await user.click(screen.getByRole("button", { name: /record payment/i }));
+
+      await waitFor(() => expect(loansService.getLoanSummary).toHaveBeenCalledTimes(2));
     });
 
     it("hides the record-payment form without record_loan_payments permission", async () => {

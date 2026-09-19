@@ -22,6 +22,7 @@ import {
   ShoppingCart,
   TrendingUp,
 } from "lucide-react";
+import { LoanCharts } from "../../components/LoanCharts";
 import { getDashboardSummary } from "../../services/dashboard";
 import type { DashboardSummary, RevenueTrendPoint } from "../../services/dashboard";
 import { usePermissions } from "../../hooks/usePermissions";
@@ -201,6 +202,10 @@ function buildPriorityItems(summary: DashboardSummary | null, canManageUsers: bo
   return items;
 }
 
+// Same set the loan sales page and its chart endpoint accept -- holding any one of
+// them is enough to see how the loan book is doing.
+const LOAN_PERMISSIONS = ["create_loan_sales", "edit_loan_sales", "delete_loan_sales", "record_loan_payments"] as const;
+
 const TONE_STYLES: Record<PriorityItem["tone"], string> = {
   danger: "border-danger/20 bg-danger/5 text-danger",
   warning: "border-warning/20 bg-warning/5 text-warning",
@@ -227,6 +232,7 @@ export default function DashboardPage() {
       ? ((today.revenue - yesterday.revenue) / yesterday.revenue) * 100
       : null;
   const priorityItems = buildPriorityItems(summary, has("manage_users"));
+  const canSeeLoans = has([...LOAN_PERMISSIONS]);
 
   return (
     <div className="space-y-6">
@@ -324,6 +330,8 @@ export default function DashboardPage() {
           )}
         </div>
       </div>
+
+      {canSeeLoans ? <LoanCharts days={14} /> : null}
     </div>
   );
 }

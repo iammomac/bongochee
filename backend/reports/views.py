@@ -11,7 +11,7 @@ from rest_framework.views import APIView
 
 from accounts.models import PasswordChangeRequest, User
 from activitylog.services import log_action
-from rbac.permissions import HasPermission, IsAdminOrSuper
+from rbac.permissions import HasPermission, IsAdminOrSuper, user_has_permission
 from reports import services
 from reports.exports import multi_sheet_xlsx, rows_to_pdf, rows_to_xlsx
 from reports.serializers import DashboardSummarySerializer
@@ -69,14 +69,6 @@ class DashboardSummaryView(APIView):
         return Response(serializer.data)
 
 
-def _user_has_permission(user, codename):
-    if user.is_superuser or (user.role and user.role.is_system_role):
-        return True
-    if not user.role:
-        return False
-    return user.role.permissions.filter(codename=codename).exists()
-
-
 def _parse_date(value, default):
     if not value:
         return default
@@ -129,20 +121,20 @@ class BaseReportView(APIView):
         return None
 
     def get(self, request, *args, **kwargs):
-        if self.requires_view_profit and not _user_has_permission(request.user, "view_profit"):
+        if self.requires_view_profit and not user_has_permission(request.user, "view_profit"):
             return Response(
                 {"detail": "You do not have permission to view profit data."},
                 status=status.HTTP_403_FORBIDDEN,
             )
 
         export_format = request.query_params.get("export")
-        if export_format and not _user_has_permission(request.user, "export_reports"):
+        if export_format and not user_has_permission(request.user, "export_reports"):
             return Response(
                 {"detail": "You do not have permission to export reports."},
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        can_view_profit = _user_has_permission(request.user, "view_profit")
+        can_view_profit = user_has_permission(request.user, "view_profit")
         columns, rows, totals = self.build_report(request)
 
         if self.profit_fields and not can_view_profit:
@@ -384,7 +376,7 @@ class PersonReportView(APIView):
         target_user = get_object_or_404(User, id=user_id)
         date_from, date_to = _date_range(request)
         data = services.person_report(target_user, date_from, date_to)
-        if not _user_has_permission(request.user, "view_profit"):
+        if not user_has_permission(request.user, "view_profit"):
             data["sales_made"].pop("profit", None)
             data["stock_added"].pop("value", None)
         return Response(data)

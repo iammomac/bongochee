@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { formatDate } from "../../lib/dates";
 import { currency } from "../../lib/money";
 
 type DetailKind = "text" | "date" | "money" | "number" | "note";
@@ -91,17 +92,6 @@ export const LOSS_DETAIL_COLUMNS: DetailColumn[] = [
   { key: "condition", label: "Condition", kind: "note" },
   { key: "saleNotes", label: "Sale notes", kind: "note" },
 ];
-
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
-// "2026-09-19" -> "19 Sep 2026". Built from the parts rather than new Date(iso) so a
-// browser west of UTC can't shift a plain calendar date back a day, and from a fixed
-// month list rather than Intl so every browser's locale data renders the same text.
-function formatDate(iso: string) {
-  const [year, month, day] = iso.split("-").map(Number);
-  if (!year || !month || !day) return iso;
-  return `${String(day).padStart(2, "0")} ${MONTHS[month - 1]} ${year}`;
-}
 
 function formatCell(kind: DetailKind, value: unknown): string {
   if (value === null || value === undefined || value === "") return "—";

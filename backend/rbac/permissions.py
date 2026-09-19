@@ -52,3 +52,15 @@ class HasPermission(BasePermission):
             return False
         user_perms = set(user.role.permissions.values_list("codename", flat=True))
         return any(p in user_perms for p in required)
+
+
+def user_has_permission(user, codename):
+    """Same resolution HasPermission uses, for code that needs to decide per-field
+    inside a view or serializer (e.g. hiding profit) rather than gate a whole endpoint."""
+    if not (user and user.is_authenticated):
+        return False
+    if user.is_superuser or (user.role and user.role.is_system_role):
+        return True
+    if not user.role:
+        return False
+    return user.role.permissions.filter(codename=codename).exists()

@@ -1,6 +1,6 @@
 import { api } from "./api";
 import { unwrapList, type Paginated } from "../lib/pagination";
-import type { LoanSale, PaymentMethod } from "../types";
+import type { LoanSale, LoanSummary, PaymentMethod } from "../types";
 
 export interface LoanSaleItemPayload {
   stockItem: string;
@@ -65,5 +65,10 @@ export async function addLoanPayment(loanId: string, payload: LoanPaymentPayload
 
 export async function removeLoanPayment(loanId: string, paymentId: string) {
   const { data } = await api.delete<LoanSale>(`/loans/loan-sales/${loanId}/payments/${paymentId}/`);
+  return data;
+}
+
+export async function getLoanSummary(days: number) {
+  const { data } = await api.get<LoanSummary>("/loans/loan-sales/summary/", { params: { days } });
   return data;
 }

@@ -13,3 +13,12 @@ if (!window.matchMedia) {
     dispatchEvent: () => false,
   });
 }
+
+// jsdom has no ResizeObserver, which recharts' ResponsiveContainer measures itself with.
+if (!("ResizeObserver" in globalThis)) {
+  globalThis.ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+}

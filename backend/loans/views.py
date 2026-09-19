@@ -6,9 +6,13 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from activitylog.services import log_action
+from loans import services
 from loans.models import LoanPayment, LoanSale, LoanSaleItem
 from loans.serializers import LoanPaymentSerializer, LoanSaleSerializer
-from rbac.permissions import HasPermission
+from rbac.permissions import HasPermission, user_has_permission
+
+# Anyone who can do anything with loan sales can see how the loan book is doing.
+ANY_LOAN_PERMISSION = ("create_loan_sales", "edit_loan_sales", "delete_loan_sales", "record_loan_payments")
 
 
 class LoanSaleViewSet(viewsets.ModelViewSet):
@@ -33,6 +37,8 @@ class LoanSaleViewSet(viewsets.ModelViewSet):
             self.required_permission = "record_loan_payments"
         elif self.action == "remove_payment":
             self.required_permission = "delete_loan_sales"
+        elif self.action == "summary":
+            self.required_permission = ANY_LOAN_PERMISSION
         else:
             self.required_permission = "create_loan_sales"
         return super().get_permissions()
@@ -74,7 +80,9 @@ class LoanSaleViewSet(viewsets.ModelViewSet):
         # Re-fetch: loan_sale's `.payments` prefetch was cached before this payment
         # existed, so serializing it directly would total up a stale (short) list.
         loan_sale = self.get_queryset().get(pk=loan_sale.pk)
-        return Response(LoanSaleSerializer(loan_sale).data, status=status.HTTP_201_CREATED)
+        return Response(
+            LoanSaleSerializer(loan_sale, context={"request": request}).data, status=status.HTTP_201_CREATED
+        )
 
     @action(detail=True, methods=["delete"], url_path=r"payments/(?P<payment_id>[^/.]+)")
     def remove_payment(self, request, pk=None, payment_id=None):
@@ -93,4 +101,21 @@ class LoanSaleViewSet(viewsets.ModelViewSet):
         )
         payment.delete()
         loan_sale = self.get_queryset().get(pk=loan_sale.pk)
-        return Response(LoanSaleSerializer(loan_sale).data)
+        return Response(LoanSaleSerializer(loan_sale, context={"request": request}).data)
+
+    @action(detail=False, methods=["get"], url_path="summary")
+    def summary(self, request):
+        """Chart data: per-day loans/revenue/expected profit for the last `days` days,
+        plus the whole book's paid-vs-owed position."""
+        try:
+            days = int(request.query_params.get("days", 14))
+        except ValueError:
+            days = 14
+        days = max(1, min(days, services.MAX_SUMMARY_DAYS))
+
+        data = services.loan_summary(days)
+        if not user_has_permission(request.user, "view_profit"):
+            data["totals"].pop("expected_profit")
+            for point in data["trend"]:
+                point.pop("expected_profit")
+        return Response(data)

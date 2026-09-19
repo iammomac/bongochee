@@ -4,6 +4,7 @@ from rest_framework import serializers
 
 from loans.models import LoanPayment, LoanSale, LoanSaleItem
 from notifications.services import notify_permission_holders
+from rbac.permissions import user_has_permission
 from sales.models import SaleItem
 from stock.models import LOW_STOCK_THRESHOLD, StockItem
 
@@ -52,6 +53,14 @@ class LoanSaleSerializer(serializers.ModelSerializer):
     total_paid = serializers.SerializerMethodField()
     balance = serializers.SerializerMethodField()
     loan_status = serializers.SerializerMethodField()
+    revenue = serializers.SerializerMethodField()
+    cost = serializers.SerializerMethodField()
+    expected_profit = serializers.SerializerMethodField()
+
+    # Cost and profit are business-sensitive; hidden unless the viewer has view_profit,
+    # the same rule the reports use. No request in the context (e.g. a bare
+    # serializer built by other code) fails closed.
+    PROFIT_FIELDS = ("cost", "expected_profit")
 
     class Meta:
         model = LoanSale
@@ -70,9 +79,20 @@ class LoanSaleSerializer(serializers.ModelSerializer):
             "total_paid",
             "balance",
             "loan_status",
+            "revenue",
+            "cost",
+            "expected_profit",
             "created_at",
         )
         read_only_fields = ("id", "sold_by", "sold_by_name", "created_at")
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        request = self.context.get("request")
+        if not (request and user_has_permission(request.user, "view_profit")):
+            for field in self.PROFIT_FIELDS:
+                data.pop(field, None)
+        return data
 
     def get_sold_by_name(self, obj):
         return obj.sold_by.get_full_name() or obj.sold_by.username
@@ -95,6 +115,17 @@ class LoanSaleSerializer(serializers.ModelSerializer):
     def get_balance(self, obj):
         owed, paid = self._totals(obj)
         return owed - paid
+
+    # Revenue is the sale's net value (price minus discount) -- what the business
+    # will have brought in once fully paid; profit is that less what the phones cost.
+    def get_revenue(self, obj):
+        return sum((item.selling_price - item.discount for item in obj.items.all()), Decimal("0"))
+
+    def get_cost(self, obj):
+        return sum((item.stock_item.buying_price for item in obj.items.all()), Decimal("0"))
+
+    def get_expected_profit(self, obj):
+        return self.get_revenue(obj) - self.get_cost(obj)
 
     def get_loan_status(self, obj):
         owed, paid = self._totals(obj)
