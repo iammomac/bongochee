@@ -47,6 +47,7 @@ INSTALLED_APPS = [
     "reports",
     "activitylog",
     "notifications",
+    "notes",
 ]
 
 MIDDLEWARE = [
@@ -139,7 +140,7 @@ REST_FRAMEWORK = {
         "rest_framework.throttling.UserRateThrottle",
         "rest_framework.throttling.AnonRateThrottle",
     ),
-    "DEFAULT_THROTTLE_RATES": {"user": "1000/day", "anon": "20/min", "login": "10/min", "password_request": "5/hour"},
+    "DEFAULT_THROTTLE_RATES": {"user": "1000/day", "anon": "20/min", "login": "10/min", "password_request": "5/hour", "notes": "20000/day"},
     "EXCEPTION_HANDLER": "config.exceptions.custom_exception_handler",
     # Emit real JSON numbers for DecimalField (money) instead of DRF's default
     # string serialization — every frontend type for a currency field assumes `number`.

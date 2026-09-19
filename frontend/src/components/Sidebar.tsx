@@ -6,6 +6,7 @@ import {
   ShoppingCart,
   RotateCcw,
   HandCoins,
+  StickyNote,
   BarChart3,
   Users,
   Shield,
@@ -38,6 +39,8 @@ const NAV = [
   },
   { to: "/returns", label: "Returns", icon: RotateCcw, perm: "create_returns" as PermissionCode, adminOnly: false },
   { to: "/reports", label: "Reports", icon: BarChart3, perm: "view_reports" as PermissionCode, adminOnly: false },
+  // Everyone gets their own notes -- no permission gates this one.
+  { to: "/notes", label: "Notes", icon: StickyNote, perm: null, adminOnly: false },
   { to: "/users", label: "Users", icon: Users, perm: null, adminOnly: true },
   { to: "/roles", label: "Roles", icon: Shield, perm: null, adminOnly: true },
   { to: "/suppliers", label: "Suppliers", icon: Truck, perm: "manage_suppliers" as PermissionCode, adminOnly: false },
@@ -55,7 +58,7 @@ function NavLinks({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: 
   const { has, isAdminOrSuper } = usePermissions();
   return (
     <nav className="flex flex-col gap-1">
-      {NAV.filter((item) => (item.adminOnly ? isAdminOrSuper : has(item.perm!))).map(({ to, label, icon: Icon }) => (
+      {NAV.filter((item) => (item.adminOnly ? isAdminOrSuper : item.perm === null || has(item.perm))).map(({ to, label, icon: Icon }) => (
         <NavLink
           key={to}
           to={to}

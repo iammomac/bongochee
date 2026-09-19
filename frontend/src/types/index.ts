@@ -46,7 +46,8 @@ export type NotificationType =
   | "password_request"
   | "failed_login"
   | "new_return"
-  | "system_alert";
+  | "system_alert"
+  | "note_shared";
 
 export interface Notification {
   id: string;
@@ -337,3 +338,45 @@ export type PermissionCode =
   | "view_reports" | "export_reports"
   | "manage_users" | "manage_roles" | "manage_suppliers"
   | "view_profit" | "view_logs";
+
+export type NoteAccess = "owner" | "edit" | "view";
+export type NoteSharePermission = "edit" | "view";
+
+export interface NoteShareEntry {
+  user: string;
+  userName: string;
+  permission: NoteSharePermission;
+}
+
+// The light shape the list pane uses (no full body).
+export interface NoteSummary {
+  id: string;
+  title: string;
+  preview: string;
+  isPinned: boolean;
+  owner: string;
+  ownerName: string;
+  myAccess: NoteAccess;
+  sharedCount: number;
+  lastEditedByName: string | null;
+  updatedAt: string;
+}
+
+export interface Note {
+  id: string;
+  title: string;
+  body: string;
+  isPinned: boolean;
+  owner: string;
+  ownerName: string;
+  myAccess: NoteAccess;
+  shares: NoteShareEntry[];
+  lastEditedByName: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface NotePerson {
+  id: string;
+  name: string;
+}

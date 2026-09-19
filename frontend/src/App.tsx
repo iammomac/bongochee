@@ -18,6 +18,7 @@ import SuppliersPage from "./pages/suppliers/SuppliersPage";
 import ForcePasswordChangePage from "./pages/auth/ForcePasswordChangePage";
 import ActivityLogPage from "./pages/logs/ActivityLogPage";
 import BackupPage from "./pages/system/BackupPage";
+import NotesPage from "./pages/notes/NotesPage";
 
 const queryClient = new QueryClient();
 
@@ -36,6 +37,7 @@ export default function App() {
             <Route element={<ProtectedRoute />}>
               <Route element={<DashboardLayout />}>
                 <Route path="/" element={<DashboardPage />} />
+                <Route path="/notes" element={<NotesPage />} />
                 <Route element={<ProtectedRoute requires="add_stock" />}>
                   <Route path="/categories" element={<CategoriesPage />} />
                   <Route path="/stock" element={<StockPage />} />

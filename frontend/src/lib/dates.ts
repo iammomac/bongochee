@@ -20,3 +20,11 @@ export function formatDayMonth(iso: string) {
   const p = parts(iso);
   return p ? `${p.day} ${MONTHS[p.month - 1]}` : iso;
 }
+
+// "2026-09-19T14:32:10+03:00" -> "19 Sep 2026, 14:32" in the viewer's own timezone.
+export function formatDateTime(iso: string) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(d.getDate())} ${MONTHS[d.getMonth()]} ${d.getFullYear()}, ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}

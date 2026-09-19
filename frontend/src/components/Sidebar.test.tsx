@@ -20,10 +20,10 @@ const user: User = {
   mustChangePassword: false,
 };
 
-function renderSidebar(props: { mobileOpen: boolean; onCloseMobile: () => void }) {
+function renderSidebar(props: { mobileOpen: boolean; onCloseMobile: () => void }, asUser: User = user) {
   return render(
     <AuthContext.Provider
-      value={{ user, isLoading: false, login: vi.fn(), logout: vi.fn(), changePassword: vi.fn() }}
+      value={{ user: asUser, isLoading: false, login: vi.fn(), logout: vi.fn(), changePassword: vi.fn() }}
     >
       <MemoryRouter>
         <Sidebar {...props} />
@@ -44,6 +44,15 @@ describe("Sidebar", () => {
     renderSidebar({ mobileOpen: false, onCloseMobile: vi.fn() });
     // Only the desktop rail's copy of each link should exist.
     expect(screen.getAllByRole("link", { name: /dashboard/i })).toHaveLength(1);
+  });
+
+  it("shows Notes to a user with no permissions at all, while hiding everything gated", () => {
+    const plainUser: User = { ...user, isSuperuser: false, role: null };
+    renderSidebar({ mobileOpen: false, onCloseMobile: vi.fn() }, plainUser);
+
+    expect(screen.getByRole("link", { name: /notes/i })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /^sales$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /^users$/i })).not.toBeInTheDocument();
   });
 
   it("closes the mobile drawer after clicking a nav link", async () => {

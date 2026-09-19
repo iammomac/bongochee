@@ -12,6 +12,7 @@ class Notification(models.Model):
         ("failed_login", "Failed Login"),
         ("new_return", "New Return"),
         ("system_alert", "System Alert"),
+        ("note_shared", "Note Shared"),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
