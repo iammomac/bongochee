@@ -7,7 +7,7 @@ from django.middleware.csrf import get_token
 from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework_simplejwt.exceptions import TokenError
@@ -138,9 +138,7 @@ class AuthViewSet(viewsets.ViewSet):
 
 
 class UserViewSet(viewsets.ModelViewSet):
-    # No "delete" — Sale.sold_by is on_delete=PROTECT, so hard-deleting a user with
-    # sales history 500s. Lifecycle is managed via is_active/is_active_employee instead.
-    http_method_names = ["get", "post", "put", "patch", "head", "options"]
+    http_method_names = ["get", "post", "put", "patch", "delete", "head", "options"]
     queryset = User.objects.select_related("role").all()
     serializer_class = UserSerializer
 
@@ -184,6 +182,47 @@ class UserViewSet(viewsets.ModelViewSet):
                 )
         serializer.save()
         log_action(user=self.request.user, action="user.update", request=self.request, username=serializer.instance.username)
+
+    # Records that point back at the user who made them (on_delete=PROTECT) -- deleting
+    # someone who has any would orphan real sales/stock/returns/loan history, so those
+    # accounts are deactivated instead. related_name -> label used in the message.
+    HISTORY_RELATIONS = (
+        ("sales", "sales"),
+        ("stock_ins", "stock batches"),
+        ("returns_processed", "returns"),
+        ("loan_sales", "loan sales"),
+        ("loan_payments_recorded", "loan payments"),
+    )
+
+    def perform_destroy(self, instance):
+        actor = self.request.user
+        if instance.pk == actor.pk:
+            raise ValidationError({"detail": "You can't delete your own account."})
+        if instance.is_superuser:
+            # The super account is the owner's recovery path -- nobody deletes it, ever.
+            raise PermissionDenied("The super admin account can't be deleted.")
+        if instance.role and instance.role.is_system_role and not actor.is_superuser:
+            raise PermissionDenied("Only the super admin can delete an Admin account.")
+
+        history = [
+            f"{count} {label}"
+            for relation, label in self.HISTORY_RELATIONS
+            if (count := getattr(instance, relation).count())
+        ]
+        if history:
+            raise ValidationError(
+                {
+                    "detail": (
+                        f"Can't delete {instance.username} -- they have {', '.join(history)} on record. "
+                        "Deactivate the account instead to keep that history."
+                    )
+                }
+            )
+
+        username = instance.username
+        instance.delete()
+        # Logged after the fact: the row is gone, but the entry keeps who was removed and by whom.
+        log_action(user=actor, action="user.delete", request=self.request, username=username)
 
 
 class PasswordChangeRequestViewSet(viewsets.ModelViewSet):

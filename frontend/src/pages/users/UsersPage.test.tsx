@@ -5,12 +5,14 @@ import UsersPage from "./UsersPage";
 import * as usersService from "../../services/users";
 import * as rbacService from "../../services/rbac";
 import * as passwordRequestsService from "../../services/passwordRequests";
+import { useAuth } from "../../hooks/useAuth";
 import type { RoleWithPermissionIds } from "../../services/rbac";
 import type { Role, User } from "../../types";
 
 vi.mock("../../services/users");
 vi.mock("../../services/rbac");
 vi.mock("../../services/passwordRequests");
+vi.mock("../../hooks/useAuth");
 
 // The Users page's role dropdown is populated from listRoles() (RoleWithPermissionIds —
 // numeric permission ids), which is a different shape from the codename-string Role
@@ -48,9 +50,18 @@ const existingUser: User = {
   mustChangePassword: false,
 };
 
+// Who's signed in -- the page uses this to know which delete buttons make sense.
+function signInAs(overrides: Partial<User> = {}) {
+  const me: User = { ...existingUser, id: "me-1", username: "boss", fullName: "The Boss", ...overrides };
+  vi.mocked(useAuth).mockReturnValue({ user: me } as never);
+}
+
+const adminRole: Role = { ...userRole, id: "role-admin", name: "Admin", isSystemRole: true };
+
 describe("UsersPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    signInAs({ isSuperuser: true });
     vi.mocked(usersService.listUsers).mockResolvedValue([existingUser]);
     vi.mocked(rbacService.listRoles).mockResolvedValue([roleForDropdown]);
     vi.mocked(passwordRequestsService.listPendingPasswordRequests).mockResolvedValue([]);
@@ -120,5 +131,76 @@ describe("UsersPage", () => {
     const [, payload] = vi.mocked(usersService.updateUser).mock.calls[0];
     expect(payload).not.toHaveProperty("password");
     expect(payload.firstName).toBe("Janet");
+  });
+
+  describe("deleting a user", () => {
+    it("deletes after an inline confirm and drops the row", async () => {
+      vi.mocked(usersService.deleteUser).mockResolvedValue(undefined);
+      const user = userEvent.setup();
+      render(<UsersPage />);
+
+      await user.click(await screen.findByRole("button", { name: "Delete jdoe" }));
+      expect(screen.getByText("Delete jdoe?")).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Confirm" }));
+
+      await waitFor(() => expect(usersService.deleteUser).toHaveBeenCalledWith("user-1"));
+      await waitFor(() => expect(screen.queryByText("J Doe")).not.toBeInTheDocument());
+    });
+
+    it("does nothing if you cancel the confirm", async () => {
+      const user = userEvent.setup();
+      render(<UsersPage />);
+
+      await user.click(await screen.findByRole("button", { name: "Delete jdoe" }));
+      await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+      expect(usersService.deleteUser).not.toHaveBeenCalled();
+      expect(screen.getByText("J Doe")).toBeInTheDocument();
+    });
+
+    it("shows the server's reason and keeps the user when the delete is refused", async () => {
+      vi.mocked(usersService.deleteUser).mockRejectedValue({
+        isAxiosError: true,
+        response: {
+          data: { detail: "Can't delete jdoe -- they have 12 sales on record. Deactivate the account instead to keep that history." },
+        },
+      });
+      const user = userEvent.setup();
+      render(<UsersPage />);
+
+      await user.click(await screen.findByRole("button", { name: "Delete jdoe" }));
+      await user.click(screen.getByRole("button", { name: "Confirm" }));
+
+      expect(await screen.findByText(/12 sales on record/)).toBeInTheDocument();
+      expect(screen.getByText("J Doe")).toBeInTheDocument();
+    });
+
+    it("offers no delete for your own account or for the super admin", async () => {
+      signInAs({ id: "user-1", username: "jdoe", isSuperuser: false, role: adminRole });
+      vi.mocked(usersService.listUsers).mockResolvedValue([
+        existingUser, // that's "me"
+        { ...existingUser, id: "user-9", username: "theowner", fullName: "The Owner", isSuperuser: true },
+      ]);
+      render(<UsersPage />);
+
+      await screen.findByText("The Owner");
+      expect(screen.queryByRole("button", { name: "Delete jdoe" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Delete theowner" })).not.toBeInTheDocument();
+    });
+
+    it("lets only the super admin delete another Admin account", async () => {
+      const otherAdmin: User = { ...existingUser, id: "user-5", username: "admin2", fullName: "Admin Two", role: adminRole };
+      vi.mocked(usersService.listUsers).mockResolvedValue([otherAdmin]);
+
+      signInAs({ isSuperuser: false, role: adminRole }); // a plain admin
+      const { unmount } = render(<UsersPage />);
+      await screen.findByText("Admin Two");
+      expect(screen.queryByRole("button", { name: "Delete admin2" })).not.toBeInTheDocument();
+      unmount();
+
+      signInAs({ isSuperuser: true });
+      render(<UsersPage />);
+      expect(await screen.findByRole("button", { name: "Delete admin2" })).toBeInTheDocument();
+    });
   });
 });

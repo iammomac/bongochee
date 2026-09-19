@@ -24,6 +24,10 @@ export async function createUser(input: UserInput) {
   return data;
 }
 
+export async function deleteUser(id: string) {
+  await api.delete(`/auth/users/${id}/`);
+}
+
 export async function updateUser(id: string, input: Partial<UserInput>) {
   const { data } = await api.patch<User>(`/auth/users/${id}/`, input);
   return data;

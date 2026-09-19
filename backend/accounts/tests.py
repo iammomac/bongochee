@@ -338,11 +338,88 @@ class UserViewSetAdminTierTests(APITestCase):
         self.super_admin.refresh_from_db()
         self.assertTrue(self.super_admin.check_password("Str0ngPassw0rd!"))  # unchanged
 
-    def test_delete_is_disabled(self):
+    def _delete(self, user):
+        return self.client.delete(f"/api/v1/auth/users/{user.id}/")
+
+    def test_system_admin_can_delete_a_user(self):
+        self.client.force_authenticate(self.system_admin)
+        res = self._delete(self.regular_user)
+        self.assertEqual(res.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(User.objects.filter(id=self.regular_user.id).exists())
+
+    def test_superuser_can_delete_a_user(self):
         self.client.force_authenticate(self.super_admin)
-        res = self.client.delete(f"/api/v1/auth/users/{self.regular_user.id}/")
-        self.assertEqual(res.status_code, status.HTTP_405_METHOD_NOT_ALLOWED)
+        self.assertEqual(self._delete(self.regular_user).status_code, status.HTTP_204_NO_CONTENT)
+
+    def test_a_custom_role_cannot_delete_even_with_manage_users(self):
+        from rbac.models import Permission
+
+        perm = Permission.objects.create(codename="manage_users", label="Manage Users", category="admin")
+        self.custom_role.permissions.add(perm)
+        other = User.objects.create_user(
+            username="other", password="Str0ngPassw0rd!", phone="255700000008", must_change_password=False
+        )
+        self.client.force_authenticate(self.regular_user)
+        self.assertEqual(self._delete(other).status_code, status.HTTP_403_FORBIDDEN)
+        self.assertTrue(User.objects.filter(id=other.id).exists())
+
+    def test_nobody_can_delete_their_own_account(self):
+        for actor in (self.system_admin, self.super_admin):
+            self.client.force_authenticate(actor)
+            self.assertEqual(self._delete(actor).status_code, status.HTTP_400_BAD_REQUEST)
+            self.assertTrue(User.objects.filter(id=actor.id).exists())
+
+    def test_the_super_admin_account_cannot_be_deleted_by_anyone(self):
+        second_super = User.objects.create_user(
+            username="super2", password="Str0ngPassw0rd!", phone="255700000009",
+            is_superuser=True, must_change_password=False,
+        )
+        for actor in (self.system_admin, second_super):
+            self.client.force_authenticate(actor)
+            self.assertEqual(self._delete(self.super_admin).status_code, status.HTTP_403_FORBIDDEN)
+        self.assertTrue(User.objects.filter(id=self.super_admin.id).exists())
+
+    def test_a_non_super_admin_cannot_delete_another_admin_but_super_can(self):
+        other_admin = User.objects.create_user(
+            username="admin2", password="Str0ngPassw0rd!", phone="255700000010",
+            role=self.admin_role, must_change_password=False,
+        )
+        self.client.force_authenticate(self.system_admin)
+        self.assertEqual(self._delete(other_admin).status_code, status.HTTP_403_FORBIDDEN)
+        self.assertTrue(User.objects.filter(id=other_admin.id).exists())
+
+        self.client.force_authenticate(self.super_admin)
+        self.assertEqual(self._delete(other_admin).status_code, status.HTTP_204_NO_CONTENT)
+
+    def test_a_user_with_recorded_history_cannot_be_deleted(self):
+        from sales.models import Sale
+
+        Sale.objects.create(
+            invoice_number="INV-HIST", customer_name="X", payment_method="cash", sold_by=self.regular_user
+        )
+        self.client.force_authenticate(self.super_admin)
+        res = self._delete(self.regular_user)
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("1 sales", res.json()["detail"])
+        self.assertIn("Deactivate", res.json()["detail"])
         self.assertTrue(User.objects.filter(id=self.regular_user.id).exists())
+
+    def test_deleting_a_user_cleans_up_their_password_requests_and_keeps_their_log_entries(self):
+        from activitylog.models import ActivityLog
+
+        PasswordChangeRequest.objects.create(user=self.regular_user, reason="forgot")
+        ActivityLog.objects.create(user=self.regular_user, action="login.success")
+        self.client.force_authenticate(self.super_admin)
+
+        self.assertEqual(self._delete(self.regular_user).status_code, status.HTTP_204_NO_CONTENT)
+
+        self.assertFalse(PasswordChangeRequest.objects.filter(reason="forgot").exists())
+        # Their audit trail survives, just no longer attached to a user.
+        self.assertTrue(ActivityLog.objects.filter(action="login.success", user__isnull=True).exists())
+        # ...and the deletion itself is on record, naming who was removed.
+        entry = ActivityLog.objects.get(action="user.delete")
+        self.assertEqual(entry.user, self.super_admin)
+        self.assertEqual(entry.details["username"], "regular")
 
     def test_password_submitted_on_update_is_hashed_not_stored_raw(self):
         self.client.force_authenticate(self.super_admin)

@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
-import { Plus, Pencil, X } from "lucide-react";
+import { Plus, Pencil, Trash2, X } from "lucide-react";
 import { PasswordRequestsPanel } from "./PasswordRequestsPanel";
 import { Select } from "../../components/Select";
-import { createUser, listUsers, updateUser, type UserInput } from "../../services/users";
+import { createUser, deleteUser, listUsers, updateUser, type UserInput } from "../../services/users";
 import { listRoles, type RoleWithPermissionIds } from "../../services/rbac";
 import { extractErrorMessage } from "../../lib/errors";
+import { useAuth } from "../../hooks/useAuth";
 import type { User } from "../../types";
 
 const blankInput: UserInput = {
@@ -130,6 +131,17 @@ export default function UsersPage() {
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState<UserInput>(blankInput);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const { user: me } = useAuth();
+
+  // Mirrors the server's rules (the server is what actually enforces them): never your
+  // own account, never the super admin, and only the super admin may remove an Admin.
+  const canDelete = (target: User) =>
+    Boolean(me) &&
+    target.id !== me?.id &&
+    !target.isSuperuser &&
+    !(target.role?.isSystemRole && !me?.isSuperuser);
 
   const load = () => {
     Promise.all([listUsers(), listRoles()])
@@ -192,6 +204,22 @@ export default function UsersPage() {
       setError(extractErrorMessage(err, "Unable to update this user"));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleDelete = async (target: User) => {
+    setError(null);
+    setDeletingId(target.id);
+    try {
+      await deleteUser(target.id);
+      setUsers((prev) => prev.filter((u) => u.id !== target.id));
+      setConfirmDeleteId(null);
+    } catch (err) {
+      // e.g. "has 12 sales on record -- deactivate instead": kept on screen, not swallowed.
+      setError(extractErrorMessage(err, "Unable to delete this user"));
+      setConfirmDeleteId(null);
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -287,21 +315,49 @@ export default function UsersPage() {
                     </span>
                   </td>
                   <td className="px-4 py-3">
-                    <div className="flex justify-end gap-1">
-                      <button
-                        onClick={() => startEdit(user)}
-                        className="rounded-full p-1.5 text-gray-400 hover:bg-primary/10 hover:text-primary"
-                        aria-label={`Edit ${user.username}`}
-                      >
-                        <Pencil size={14} />
-                      </button>
-                      <button
-                        onClick={() => void toggleActive(user)}
-                        className="rounded-xl border border-gray-200 px-2.5 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-800 dark:text-gray-300 dark:hover:bg-gray-800"
-                      >
-                        {user.isActive ? "Deactivate" : "Activate"}
-                      </button>
-                    </div>
+                    {confirmDeleteId === user.id ? (
+                      <div className="flex items-center justify-end gap-2">
+                        <span className="text-xs text-gray-400">Delete {user.username}?</span>
+                        <button
+                          onClick={() => void handleDelete(user)}
+                          disabled={deletingId === user.id}
+                          className="text-xs font-medium text-danger hover:underline disabled:opacity-50"
+                        >
+                          {deletingId === user.id ? "Deleting…" : "Confirm"}
+                        </button>
+                        <button
+                          onClick={() => setConfirmDeleteId(null)}
+                          className="text-xs font-medium text-gray-400 hover:underline"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-end gap-1">
+                        <button
+                          onClick={() => startEdit(user)}
+                          className="rounded-full p-1.5 text-gray-400 hover:bg-primary/10 hover:text-primary"
+                          aria-label={`Edit ${user.username}`}
+                        >
+                          <Pencil size={14} />
+                        </button>
+                        <button
+                          onClick={() => void toggleActive(user)}
+                          className="rounded-xl border border-gray-200 px-2.5 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-800 dark:text-gray-300 dark:hover:bg-gray-800"
+                        >
+                          {user.isActive ? "Deactivate" : "Activate"}
+                        </button>
+                        {canDelete(user) ? (
+                          <button
+                            onClick={() => setConfirmDeleteId(user.id)}
+                            className="rounded-full p-1.5 text-gray-400 hover:bg-danger/10 hover:text-danger"
+                            aria-label={`Delete ${user.username}`}
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        ) : null}
+                      </div>
+                    )}
                   </td>
                 </tr>
               ),
