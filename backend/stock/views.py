@@ -12,7 +12,11 @@ from catalog.serializers import CategorySerializer, PhoneModelSerializer
 from catalog.services import get_or_create_category, get_or_create_model
 from rbac.permissions import HasPermission
 from stock.models import StockIn, StockItem
-from stock.serializers import StockInSerializer, StockItemSerializer
+from activitylog.services import log_action
+from stock.serializers import StockInSerializer, StockItemEditSerializer, StockItemSerializer
+
+# Who may see the stock list: anyone who stocks, sells, edits or deletes stock needs the rows.
+LIST_PERMISSIONS = ("add_stock", "create_sales", "edit_stock", "delete_stock")
 
 
 class StockInViewSet(viewsets.ModelViewSet):
@@ -42,18 +46,19 @@ class StockItemViewSet(
 
     queryset = (
         StockItem.objects.select_related("stock_in__supplier", "category", "model")
+        .prefetch_related("stock_in__items")
         .all()
-        .order_by("-stock_in__created_at")
+        .order_by("-stock_in__created_at", "id")
     )
     serializer_class = StockItemSerializer
     permission_classes = [IsAuthenticated, HasPermission]
-    required_permission = ("add_stock", "create_sales")
+    required_permission = LIST_PERMISSIONS
     filterset_fields = {
         "category": ["exact"],
         "model": ["exact"],
         "quantity_remaining": ["exact", "gt"],
     }
-    search_fields = ["category__name", "model__name"]
+    search_fields = ["category__name", "model__name", "stock_in__supplier__name", "stock_in__invoice_number", "notes"]
 
     def get_permissions(self):
         if self.action in ("update", "partial_update"):
@@ -61,8 +66,44 @@ class StockItemViewSet(
         elif self.action == "destroy":
             self.required_permission = "delete_stock"
         else:
-            self.required_permission = ("add_stock", "create_sales")
+            self.required_permission = LIST_PERMISSIONS
         return super().get_permissions()
+
+    def get_serializer_class(self):
+        if self.action in ("update", "partial_update"):
+            return StockItemEditSerializer
+        return StockItemSerializer
+
+    @staticmethod
+    def _snapshot(item):
+        return {
+            "category": item.category.name,
+            "model": item.model.name,
+            "quantity": item.quantity,
+            "in_stock": item.quantity_remaining,
+            "buying_price": str(item.buying_price),
+            "min_selling_price": str(item.min_selling_price),
+            "max_selling_price": str(item.max_selling_price),
+            "notes": item.notes,
+            "supplier": item.stock_in.supplier.name,
+            "import_date": str(item.stock_in.import_date),
+            "invoice_number": item.stock_in.invoice_number,
+        }
+
+    def perform_update(self, serializer):
+        before = self._snapshot(serializer.instance)
+        saved = serializer.save()
+        after = self._snapshot(self.get_queryset().get(pk=saved.pk))
+        changes = {field: [before[field], after[field]] for field in after if before[field] != after[field]}
+        if changes:
+            log_action(
+                user=self.request.user,
+                action="stock.update",
+                request=self.request,
+                stock_item_id=str(saved.pk),
+                item=f"{after['category']} {after['model']}",
+                changes=changes,
+            )
 
     def perform_destroy(self, instance):
         if instance.sale_items.exists():

@@ -289,3 +289,164 @@ class StockImportTemplateTests(APITestCase):
         self.client.force_authenticate(self.outsider)
         res = self.client.get("/api/v1/stock/import-template/")
         self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN)
+
+
+class StockItemEditTests(APITestCase):
+    """Editing a stock line as a role that only has Edit Stock (no Add Stock)."""
+
+    def setUp(self):
+        edit_perm = Permission.objects.create(codename="edit_stock", label="Edit Stock", category="stock")
+        sales_perm = Permission.objects.create(codename="create_sales", label="Create Sales", category="sales")
+        editor_role = Role.objects.create(name="Stock editor")
+        editor_role.permissions.add(edit_perm)
+        seller_role = Role.objects.create(name="Seller")
+        seller_role.permissions.add(sales_perm)
+        self.editor = User.objects.create_user(
+            username="editor", password="Str0ngPassw0rd!", phone="255700000070", role=editor_role, must_change_password=False
+        )
+        self.seller = User.objects.create_user(
+            username="seller9", password="Str0ngPassw0rd!", phone="255700000071", role=seller_role, must_change_password=False
+        )
+
+        self.supplier = Supplier.objects.create(name="Blue Telecom")
+        self.other_supplier = Supplier.objects.create(name="Red Mobile")
+        self.samsung = Category.objects.create(name="Samsung")
+        self.apple = Category.objects.create(name="Apple")
+        self.a56 = PhoneModel.objects.create(category=self.samsung, name="Galaxy A56")
+        self.s23 = PhoneModel.objects.create(category=self.samsung, name="Galaxy S23")
+        self.iphone = PhoneModel.objects.create(category=self.apple, name="iPhone 15")
+        stock_in = StockIn.objects.create(
+            supplier=self.supplier, import_date=date(2026, 9, 1), invoice_number="INV-1", created_by=self.editor
+        )
+        # 10 received, 4 sold, 6 still in stock.
+        self.item = self._line(stock_in, self.a56, quantity=10, remaining=6)
+        self.sibling = self._line(stock_in, self.s23, quantity=3, remaining=3)
+        self.client.force_authenticate(self.editor)
+
+    def _line(self, stock_in, model, quantity, remaining):
+        return StockItem.objects.create(
+            stock_in=stock_in,
+            category=model.category,
+            model=model,
+            quantity=quantity,
+            quantity_remaining=remaining,
+            buying_price="500000",
+            min_selling_price="600000",
+            max_selling_price="700000",
+        )
+
+    def _patch(self, payload, item=None):
+        return self.client.patch(f"/api/v1/stock/stock-items/{(item or self.item).id}/", payload, format="json")
+
+    def test_editor_without_add_stock_can_open_the_list_and_edit(self):
+        self.assertEqual(self.client.get("/api/v1/stock/stock-items/").status_code, status.HTTP_200_OK)
+        res = self._patch({"notes": "Full box"})
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.notes, "Full box")
+
+    def test_a_role_without_edit_stock_cannot_edit(self):
+        self.client.force_authenticate(self.seller)
+        self.assertEqual(self._patch({"notes": "x"}).status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_raising_the_quantity_adds_the_difference_to_what_is_in_stock(self):
+        res = self._patch({"quantity": 15})
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.quantity, 15)
+        self.assertEqual(self.item.quantity_remaining, 11)  # 4 sold stay sold
+        self.assertEqual(res.json()["quantityRemaining"], 11)
+
+    def test_lowering_the_quantity_takes_the_difference_out_of_stock(self):
+        self._patch({"quantity": 7})
+        self.item.refresh_from_db()
+        self.assertEqual((self.item.quantity, self.item.quantity_remaining), (7, 3))
+
+    def test_quantity_can_go_down_to_exactly_what_was_sold(self):
+        res = self._patch({"quantity": 4})
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.quantity_remaining, 0)
+
+    def test_quantity_below_what_was_sold_is_refused_and_nothing_changes(self):
+        res = self._patch({"quantity": 3, "notes": "should not stick"})
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("4 already sold", res.json()["detail"])
+        self.item.refresh_from_db()
+        self.assertEqual((self.item.quantity, self.item.quantity_remaining, self.item.notes), (10, 6, ""))
+
+    def test_a_model_from_another_brand_is_refused(self):
+        res = self._patch({"model": str(self.iphone.id)})  # still under Samsung
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("isn't a Samsung model", res.json()["detail"])
+
+    def test_changing_brand_and_model_together_works(self):
+        res = self._patch({"category": str(self.apple.id), "model": str(self.iphone.id)})
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        body = res.json()
+        self.assertEqual((body["categoryName"], body["modelName"]), ("Apple", "iPhone 15"))
+
+    def test_max_price_below_min_is_refused(self):
+        res = self._patch({"maxSellingPrice": "550000"})
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("max selling price", res.json()["detail"])
+
+    def test_prices_and_notes_update(self):
+        res = self._patch({"buyingPrice": "480000", "minSellingPrice": "590000", "maxSellingPrice": "690000", "notes": "used"})
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.item.refresh_from_db()
+        self.assertEqual(str(self.item.buying_price), "480000.00")
+        self.assertEqual(str(self.item.min_selling_price), "590000.00")
+        self.assertEqual(self.item.notes, "used")
+
+    def test_supplier_date_and_invoice_are_corrected_for_the_whole_batch(self):
+        res = self._patch({"supplier": str(self.other_supplier.id), "importDate": "2026-08-30", "invoiceNumber": "INV-9"})
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        body = res.json()
+        self.assertEqual((body["supplierName"], body["importDate"], body["invoiceNumber"]), ("Red Mobile", "2026-08-30", "INV-9"))
+        self.assertEqual(body["batchSize"], 2)
+        self.sibling.refresh_from_db()
+        self.assertEqual(self.sibling.stock_in.supplier, self.other_supplier)
+        self.assertEqual(self.sibling.stock_in.invoice_number, "INV-9")
+
+    def test_list_reports_the_batch_details_the_edit_form_needs(self):
+        body = self.client.get("/api/v1/stock/stock-items/").json()
+        row = next(r for r in body["results"] if r["id"] == str(self.item.id))
+        self.assertEqual(row["supplier"], str(self.supplier.id))
+        self.assertEqual(row["invoiceNumber"], "INV-1")
+        self.assertEqual(row["batchSize"], 2)
+
+    def test_an_edit_is_written_to_the_activity_log(self):
+        from activitylog.models import ActivityLog
+
+        self._patch({"quantity": 12, "notes": "boxed"})
+        entry = ActivityLog.objects.get(action="stock.update")
+        self.assertEqual(entry.user, self.editor)
+        self.assertEqual(entry.details["changes"]["quantity"], [10, 12])
+        self.assertEqual(entry.details["changes"]["in_stock"], [6, 8])
+        self.assertEqual(entry.details["changes"]["notes"], ["", "boxed"])
+        self.assertNotIn("buying_price", entry.details["changes"])
+
+    def test_an_edit_that_changes_nothing_is_not_logged(self):
+        from activitylog.models import ActivityLog
+
+        self._patch({"quantity": 10, "notes": ""})
+        self.assertFalse(ActivityLog.objects.filter(action="stock.update").exists())
+
+    def test_search_finds_a_line_by_supplier_or_invoice(self):
+        by_supplier = self.client.get("/api/v1/stock/stock-items/", {"search": "Blue"}).json()["results"]
+        self.assertEqual(len(by_supplier), 2)
+        by_invoice = self.client.get("/api/v1/stock/stock-items/", {"search": "INV-1"}).json()["results"]
+        self.assertEqual(len(by_invoice), 2)
+        self.assertEqual(self.client.get("/api/v1/stock/stock-items/", {"search": "Nokia"}).json()["results"], [])
+
+    def test_pagination_reports_the_total_so_older_lines_can_be_reached(self):
+        stock_in = StockIn.objects.create(supplier=self.supplier, import_date=date(2026, 9, 2), created_by=self.editor)
+        for _ in range(30):
+            self._line(stock_in, self.a56, quantity=1, remaining=1)
+        first = self.client.get("/api/v1/stock/stock-items/").json()
+        second = self.client.get("/api/v1/stock/stock-items/", {"page": 2}).json()
+        self.assertEqual(first["count"], 32)
+        self.assertEqual(len(first["results"]), 25)
+        self.assertEqual(len(second["results"]), 7)
+        self.assertFalse({r["id"] for r in first["results"]} & {r["id"] for r in second["results"]})

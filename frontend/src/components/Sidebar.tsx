@@ -28,7 +28,13 @@ const STORAGE_KEY = "bongochee-sidebar-collapsed";
 const NAV = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, perm: "view_dashboard" as PermissionCode, adminOnly: false },
   { to: "/categories", label: "Categories", icon: Tag, perm: "add_stock" as PermissionCode, adminOnly: false },
-  { to: "/stock", label: "Stock", icon: Package, perm: "add_stock" as PermissionCode, adminOnly: false },
+  {
+    to: "/stock",
+    label: "Stock",
+    icon: Package,
+    perm: ["add_stock", "edit_stock", "delete_stock"] as PermissionCode[],
+    adminOnly: false,
+  },
   { to: "/sales", label: "Sales", icon: ShoppingCart, perm: "create_sales" as PermissionCode, adminOnly: false },
   {
     to: "/loans",

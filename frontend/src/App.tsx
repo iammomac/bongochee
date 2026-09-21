@@ -40,6 +40,8 @@ export default function App() {
                 <Route path="/notes" element={<NotesPage />} />
                 <Route element={<ProtectedRoute requires="add_stock" />}>
                   <Route path="/categories" element={<CategoriesPage />} />
+                </Route>
+                <Route element={<ProtectedRoute requires={["add_stock", "edit_stock", "delete_stock"]} />}>
                   <Route path="/stock" element={<StockPage />} />
                 </Route>
                 <Route element={<ProtectedRoute requires="create_sales" />}>

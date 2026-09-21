@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useFieldArray, useForm, useWatch, type Control } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Download, Pencil, Plus, Trash2, Upload, X } from "lucide-react";
+import { Download, Pencil, Plus, Search, Trash2, Upload, X } from "lucide-react";
 import { SupplierPicker } from "../../components/SupplierPicker";
 import { CategoryPicker } from "../../components/CategoryPicker";
 import { ModelPicker } from "../../components/ModelPicker";
@@ -11,10 +11,11 @@ import {
   deleteStockItem,
   downloadStockImportTemplate,
   importStockExcel,
-  listRecentStockItems,
+  listStockItems,
+  STOCK_PAGE_SIZE,
   updateStockItem,
 } from "../../services/stock";
-import { todayIso } from "../../lib/dates";
+import { formatDate, todayIso } from "../../lib/dates";
 import { extractErrorMessage } from "../../lib/errors";
 import { usePermissions } from "../../hooks/usePermissions";
 import type { Category, PhoneModel, StockItem, Supplier } from "../../types";
@@ -198,6 +199,10 @@ const editSchema = z
     minSellingPrice: z.number({ invalid_type_error: "Required" }).positive("Must be > 0"),
     maxSellingPrice: z.number({ invalid_type_error: "Required" }).positive("Must be > 0"),
     notes: z.string().optional(),
+    supplierId: z.string().min(1, "Pick a supplier"),
+    supplierName: z.string(),
+    importDate: z.string().min(1, "Required"),
+    invoiceNumber: z.string().optional(),
   })
   .refine((row) => row.maxSellingPrice >= row.minSellingPrice, {
     message: "Max must be ≥ min",
@@ -232,12 +237,27 @@ function EditStockItemModal({ item, onClose, onSaved }: EditStockItemModalProps)
       minSellingPrice: item.minSellingPrice,
       maxSellingPrice: item.maxSellingPrice,
       notes: item.notes,
+      supplierId: item.supplier,
+      supplierName: item.supplierName,
+      importDate: item.importDate,
+      invoiceNumber: item.invoiceNumber,
     },
   });
   const categoryId = useWatch({ control, name: "categoryId" });
   const categoryName = useWatch({ control, name: "categoryName" });
   const modelId = useWatch({ control, name: "modelId" });
   const modelName = useWatch({ control, name: "modelName" });
+  const supplierId = useWatch({ control, name: "supplierId" });
+  const supplierName = useWatch({ control, name: "supplierName" });
+  const quantity = useWatch({ control, name: "quantity" });
+
+  // Units already sold stay sold whatever the quantity is changed to, so the amount left in
+  // stock is the new quantity minus that (the server does the same sum).
+  const sold = item.quantity - item.quantityRemaining;
+  const quantityValid = Number.isFinite(quantity) && quantity >= Math.max(sold, 1);
+  const supplierValue: Supplier | null = supplierId
+    ? { id: supplierId, name: supplierName, phone: "", address: "", email: "", notes: "", createdAt: "" }
+    : null;
 
   const categoryValue: Category | null = categoryId ? { id: categoryId, name: categoryName, createdAt: "" } : null;
   const modelValue: PhoneModel | null = modelId ? { id: modelId, category: categoryId, name: modelName, createdAt: "" } : null;
@@ -253,6 +273,9 @@ function EditStockItemModal({ item, onClose, onSaved }: EditStockItemModalProps)
         minSellingPrice: values.minSellingPrice,
         maxSellingPrice: values.maxSellingPrice,
         notes: values.notes,
+        supplier: values.supplierId,
+        importDate: values.importDate,
+        invoiceNumber: values.invoiceNumber,
       });
       onSaved();
       onClose();
@@ -264,7 +287,7 @@ function EditStockItemModal({ item, onClose, onSaved }: EditStockItemModalProps)
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div className="absolute inset-0" onClick={onClose} />
-      <div className="relative w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl dark:bg-gray-900">
+      <div className="relative max-h-full w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl dark:bg-gray-900">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-semibold">Edit stock item</h2>
           <button
@@ -309,8 +332,11 @@ function EditStockItemModal({ item, onClose, onSaved }: EditStockItemModalProps)
           </div>
           <div className="grid gap-3 md:grid-cols-4">
             <div>
-              <label className="mb-1 block text-xs font-medium text-gray-500">Quantity</label>
+              <label htmlFor="edit-quantity" className="mb-1 block text-xs font-medium text-gray-500">
+                Quantity received
+              </label>
               <input
+                id="edit-quantity"
                 type="number"
                 {...register("quantity", { valueAsNumber: true })}
                 className="w-full rounded-xl border border-gray-200 px-2 py-2 text-sm outline-none focus:border-primary dark:border-gray-800 dark:bg-gray-950"
@@ -353,9 +379,56 @@ function EditStockItemModal({ item, onClose, onSaved }: EditStockItemModalProps)
               className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm outline-none focus:border-primary dark:border-gray-800 dark:bg-gray-950"
             />
           </div>
-          <p className="text-xs text-gray-400">
-            Remaining quantity ({item.quantityRemaining}) isn't editable here — it only changes as units sell.
+          <p className={`text-xs ${quantityValid ? "text-gray-400" : "text-danger"}`}>
+            {quantityValid
+              ? `Quantity is the total received. ${sold} already sold, so ${quantity - sold} will be in stock after saving (now ${item.quantityRemaining}).`
+              : `Quantity can't be less than ${Math.max(sold, 1)}${sold > 0 ? " — that many are already sold" : ""}.`}
           </p>
+          {sold > 0 ? (
+            <p className="text-xs text-gray-400">
+              Changing the buying price also changes the profit shown for the {sold} already sold.
+            </p>
+          ) : null}
+
+          <div className="space-y-3 rounded-2xl bg-gray-50 p-3 dark:bg-gray-950">
+            <p className="text-xs font-medium text-gray-500">
+              Delivery{" "}
+              {item.batchSize > 1 ? (
+                <span className="font-normal text-gray-400">
+                  — shared by all {item.batchSize} lines received together, so changing it changes them all
+                </span>
+              ) : null}
+            </p>
+            <div className="grid gap-3 md:grid-cols-3">
+              <div>
+                <label className="mb-1 block text-xs font-medium text-gray-500">Supplier</label>
+                <SupplierPicker
+                  value={supplierValue}
+                  onSelect={(supplier) => {
+                    setValue("supplierId", supplier.id);
+                    setValue("supplierName", supplier.name);
+                  }}
+                />
+                {errors.supplierId ? <p className="mt-1 text-xs text-danger">{errors.supplierId.message}</p> : null}
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-gray-500">Import date</label>
+                <input
+                  type="date"
+                  {...register("importDate")}
+                  className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm outline-none focus:border-primary dark:border-gray-800 dark:bg-gray-900"
+                />
+                {errors.importDate ? <p className="mt-1 text-xs text-danger">{errors.importDate.message}</p> : null}
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-gray-500">Invoice number</label>
+                <input
+                  {...register("invoiceNumber")}
+                  className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm outline-none focus:border-primary dark:border-gray-800 dark:bg-gray-900"
+                />
+              </div>
+            </div>
+          </div>
           <div className="flex justify-end gap-2 pt-2">
             <button
               type="button"
@@ -366,7 +439,7 @@ function EditStockItemModal({ item, onClose, onSaved }: EditStockItemModalProps)
             </button>
             <button
               type="submit"
-              disabled={isSubmitting}
+              disabled={isSubmitting || !quantityValid}
               className="rounded-xl bg-primary px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
             >
               {isSubmitting ? "Saving…" : "Save changes"}
@@ -385,10 +458,15 @@ export default function StockPage() {
   const [importing, setImporting] = useState(false);
   const [downloadingTemplate, setDownloadingTemplate] = useState(false);
   const [recentItems, setRecentItems] = useState<StockItem[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [searchText, setSearchText] = useState("");
+  const [search, setSearch] = useState("");
   const [editingItem, setEditingItem] = useState<StockItem | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const canAdd = has("add_stock");
   const canEdit = has("edit_stock");
   const canDelete = has("delete_stock");
 
@@ -414,15 +492,38 @@ export default function StockPage() {
   const supplierId = useWatch({ control, name: "supplierId" });
   const supplierName = useWatch({ control, name: "supplierName" });
 
-  const loadRecentItems = () => {
-    listRecentStockItems()
-      .then(setRecentItems)
-      .catch(() => setServerError("Unable to load recent stock"));
-  };
+  // Only the newest answer is used, so typing quickly can't leave an older search on screen.
+  const latestRequest = useRef(0);
+  const loadItems = useCallback(() => {
+    const request = ++latestRequest.current;
+    listStockItems({ search, page })
+      .then(({ items, count }) => {
+        if (request !== latestRequest.current) return;
+        // Deleting the last line on the final page leaves that page empty -- step back one.
+        if (items.length === 0 && page > 1) {
+          setPage(page - 1);
+          return;
+        }
+        setRecentItems(items);
+        setTotal(count);
+      })
+      .catch(() => {
+        if (request === latestRequest.current) setServerError("Unable to load stock");
+      });
+  }, [search, page]);
 
   useEffect(() => {
-    loadRecentItems();
-  }, []);
+    loadItems();
+  }, [loadItems]);
+
+  // Search as you type, after a short pause, always from the first page.
+  useEffect(() => {
+    const id = setTimeout(() => {
+      setSearch(searchText.trim());
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(id);
+  }, [searchText]);
 
   const handleDelete = async (id: string) => {
     setServerError(null);
@@ -430,7 +531,7 @@ export default function StockPage() {
     try {
       await deleteStockItem(id);
       setConfirmDeleteId(null);
-      loadRecentItems();
+      loadItems();
     } catch (err) {
       setServerError(extractErrorMessage(err, "Unable to delete this stock item"));
     } finally {
@@ -511,7 +612,7 @@ export default function StockPage() {
         notes: "",
         rows: [blankRow],
       });
-      loadRecentItems();
+      loadItems();
     } catch (err) {
       setServerError(extractErrorMessage(err, "Unable to save this batch"));
     }
@@ -521,11 +622,14 @@ export default function StockPage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold">Stock intake</h1>
+          <h1 className="text-2xl font-semibold">{canAdd ? "Stock intake" : "Stock"}</h1>
           <p className="text-sm text-gray-400">
-            Multi-row inventory imports with supplier and pricing control
+            {canAdd
+              ? "Multi-row inventory imports with supplier and pricing control"
+              : "Browse stock and correct its details"}
           </p>
         </div>
+        {canAdd ? (
         <div className="flex gap-2">
           <button
             type="button"
@@ -553,11 +657,13 @@ export default function StockPage() {
             {importing ? "Importing…" : "Import from Excel"}
           </button>
         </div>
+        ) : null}
       </div>
 
       {serverError ? <div className="card p-4 text-sm text-danger">{serverError}</div> : null}
       {successMessage ? <div className="card p-4 text-sm text-success">{successMessage}</div> : null}
 
+      {canAdd ? (
       <form onSubmit={handleSubmit(onSubmit)} className="card space-y-4 p-6">
         <div className="grid gap-3 md:grid-cols-4">
           <div>
@@ -629,16 +735,31 @@ export default function StockPage() {
           </button>
         </div>
       </form>
+      ) : null}
+
+      <div className="card no-print flex items-center gap-2 px-4 py-2.5">
+        <Search size={16} className="text-gray-400" />
+        <input
+          value={searchText}
+          onChange={(e) => setSearchText(e.target.value)}
+          placeholder="Search stock by model, brand, supplier, invoice or notes"
+          aria-label="Search stock"
+          className="w-full bg-transparent text-sm outline-none"
+        />
+      </div>
 
       <div className="card table-card">
         <table className="min-w-full text-sm">
           <thead className="bg-gray-50 text-left text-gray-500 dark:bg-gray-950">
             <tr>
+              <th className="px-4 py-3">Date</th>
               <th className="px-4 py-3">Supplier</th>
               <th className="px-4 py-3">Category</th>
               <th className="px-4 py-3">Model</th>
-              <th className="px-4 py-3">Qty</th>
+              <th className="px-4 py-3">Received</th>
+              <th className="px-4 py-3">In stock</th>
               <th className="px-4 py-3">Buying price</th>
+              <th className="px-4 py-3">Selling price</th>
               <th className="px-4 py-3">Notes</th>
               <th className="px-4 py-3">Status</th>
               {canEdit || canDelete ? <th className="px-4 py-3" /> : null}
@@ -651,11 +772,16 @@ export default function StockPage() {
               const canDeleteThisItem = canDelete && item.quantityRemaining === item.quantity;
               return (
                 <tr key={item.id} className="border-t border-gray-100 dark:border-gray-800">
+                  <td className="whitespace-nowrap px-4 py-3">{formatDate(item.importDate)}</td>
                   <td className="px-4 py-3">{item.supplierName}</td>
                   <td className="px-4 py-3">{item.categoryName}</td>
                   <td className="px-4 py-3">{item.modelName}</td>
+                  <td className="px-4 py-3">{item.quantity}</td>
                   <td className="px-4 py-3">{item.quantityRemaining}</td>
-                  <td className="px-4 py-3">TZS {currency(item.buyingPrice)}</td>
+                  <td className="whitespace-nowrap px-4 py-3">TZS {currency(item.buyingPrice)}</td>
+                  <td className="whitespace-nowrap px-4 py-3">
+                    {currency(item.minSellingPrice)} – {currency(item.maxSellingPrice)}
+                  </td>
                   <td className="max-w-[12rem] truncate px-4 py-3 text-gray-500" title={item.notes || undefined}>
                     {item.notes || "—"}
                   </td>
@@ -716,8 +842,8 @@ export default function StockPage() {
             })}
             {recentItems.length === 0 ? (
               <tr>
-                <td colSpan={canEdit || canDelete ? 8 : 7} className="px-4 py-8 text-center text-sm text-gray-400">
-                  No stock recorded yet
+                <td colSpan={canEdit || canDelete ? 11 : 10} className="px-4 py-8 text-center text-sm text-gray-400">
+                  {search ? "No stock matches your search" : "No stock recorded yet"}
                 </td>
               </tr>
             ) : null}
@@ -725,11 +851,37 @@ export default function StockPage() {
         </table>
       </div>
 
+      {total > 0 ? (
+        <div className="no-print flex items-center justify-between text-sm text-gray-500">
+          <span>
+            Showing {(page - 1) * STOCK_PAGE_SIZE + 1}–{Math.min(page * STOCK_PAGE_SIZE, total)} of {total}
+          </span>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setPage(page - 1)}
+              disabled={page <= 1}
+              className="rounded-xl border border-gray-200 px-3 py-1.5 text-xs font-medium disabled:opacity-40 dark:border-gray-800"
+            >
+              Previous
+            </button>
+            <button
+              type="button"
+              onClick={() => setPage(page + 1)}
+              disabled={page * STOCK_PAGE_SIZE >= total}
+              className="rounded-xl border border-gray-200 px-3 py-1.5 text-xs font-medium disabled:opacity-40 dark:border-gray-800"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       {editingItem ? (
         <EditStockItemModal
           item={editingItem}
           onClose={() => setEditingItem(null)}
-          onSaved={loadRecentItems}
+          onSaved={loadItems}
         />
       ) : null}
     </div>

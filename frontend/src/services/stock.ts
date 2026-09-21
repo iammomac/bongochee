@@ -45,9 +45,21 @@ export async function importStockExcel(file: File) {
   return data.rows;
 }
 
-export async function listRecentStockItems() {
-  const { data } = await api.get<Paginated<StockItem> | StockItem[]>("/stock/stock-items/");
-  return unwrapList(data);
+export const STOCK_PAGE_SIZE = 25;
+
+export interface StockListPage {
+  items: StockItem[];
+  count: number;
+}
+
+// One page of stock lines, newest first; `search` matches brand, model, supplier, invoice
+// number and notes.
+export async function listStockItems({ search = "", page = 1 }: { search?: string; page?: number } = {}): Promise<StockListPage> {
+  const { data } = await api.get<Paginated<StockItem> | StockItem[]>("/stock/stock-items/", {
+    params: { page, ...(search ? { search } : {}) },
+  });
+  const items = unwrapList(data);
+  return { items, count: Array.isArray(data) ? items.length : (data.count ?? items.length) };
 }
 
 export interface StockItemUpdatePayload {
@@ -58,6 +70,10 @@ export interface StockItemUpdatePayload {
   minSellingPrice: number;
   maxSellingPrice: number;
   notes?: string;
+  // These belong to the batch the line came in with, so they change for every line in it.
+  supplier: string;
+  importDate: string;
+  invoiceNumber?: string;
 }
 
 export async function updateStockItem(id: string, payload: StockItemUpdatePayload) {

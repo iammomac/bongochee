@@ -88,8 +88,12 @@ export interface StockItem {
   categoryName: string;
   model: string;
   modelName: string;
+  supplier: string;
   supplierName: string;
   importDate: string;
+  invoiceNumber: string;
+  // Lines sharing this line's supplier/date/invoice; editing those changes all of them.
+  batchSize: number;
   quantity: number;
   quantityRemaining: number;
   buyingPrice: number;
