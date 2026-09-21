@@ -318,4 +318,21 @@ describe("Searching and paging the stock list", () => {
     expect(screen.getByRole("button", { name: "Next" })).toBeDisabled();
     expect(stockService.listStockItems).toHaveBeenLastCalledWith({ search: "", page: 2 });
   });
+
+  it("stays on the page you moved to -- the search pause doesn't send you back to page 1", async () => {
+    const many = (start: number, n: number) =>
+      Array.from({ length: n }, (_, i) => makeItem({ id: `i${start + i}`, modelName: `Model ${start + i}` }));
+    vi.mocked(stockService.listStockItems).mockImplementation(async ({ page: p = 1 } = {}) =>
+      p === 1 ? page(many(1, 25), 40) : page(many(26, 15), 40),
+    );
+    const user = userEvent.setup();
+    render(<StockPage />);
+    await screen.findByText("Showing 1–25 of 40");
+
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    await new Promise((resolve) => setTimeout(resolve, 450)); // longer than the search pause
+
+    expect(screen.getByText("Showing 26–40 of 40")).toBeInTheDocument();
+    expect(stockService.listStockItems).toHaveBeenLastCalledWith({ search: "", page: 2 });
+  });
 });

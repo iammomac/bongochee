@@ -19,8 +19,6 @@ from sales.models import Sale, SaleItem
 from stock.models import StockIn, StockItem
 from suppliers.models import Supplier
 
-RETURN_CATEGORY_LABELS = dict(Return.RETURN_CATEGORY_CHOICES)
-
 NET_PRICE = F("selling_price") - F("discount")
 PROFIT = NET_PRICE - F("stock_item__buying_price")
 
@@ -193,7 +191,7 @@ def sales_detail_rows(date_from, date_to, **filters):
 
 
 RETURNS_GROUP_BY_FIELDS = {
-    "category": ("return_category", None),
+    "category": ("return_category_id", "return_category__name"),
     "model": ("sale_item__stock_item__model_id", "sale_item__stock_item__model__name"),
 }
 
@@ -205,6 +203,7 @@ def _filtered_returns(date_from, date_to, category=None, model=None, user=None):
         "sale_item__stock_item__model",
         "sale_item__stock_item__stock_in__supplier",
         "processed_by",
+        "return_category",
     )
     if category:
         qs = qs.filter(sale_item__stock_item__category_id=category)
@@ -242,7 +241,7 @@ def returns_detail_rows(date_from, date_to, category=None, model=None, user=None
                 "revenue": net,
                 "profit": net - stock_item.buying_price,
                 "condition": stock_item.notes,
-                "issue": ret.get_return_category_display(),
+                "issue": ret.return_category.name,
                 "status": ret.get_status_display(),
                 "description": ret.description,
             }
@@ -254,15 +253,11 @@ def returns_rows(date_from, date_to, group_by="category", category=None, model=N
     qs = _filtered_returns(date_from, date_to, category, model, user)
 
     id_field, label_field = RETURNS_GROUP_BY_FIELDS[group_by]
-    values_fields = (id_field,) if label_field is None else (id_field, label_field)
-    grouped = qs.values(*values_fields).annotate(count=Count("id")).order_by("-count")
+    grouped = qs.values(id_field, label_field).annotate(count=Count("id")).order_by("-count")
     rows = []
     for row in grouped:
         raw_key = row[id_field]
-        if group_by == "category":
-            label = RETURN_CATEGORY_LABELS.get(raw_key, raw_key)
-        else:
-            label = str(row.get(label_field) or raw_key)
+        label = str(row.get(label_field) or raw_key)
         rows.append({"key": str(raw_key), "label": label, "count": row["count"]})
     return rows
 
@@ -697,14 +692,14 @@ def full_backup_sheets():
         ],
     ))
 
-    returns = Return.objects.select_related("sale_item__sale", "sale_item__stock_item__category", "sale_item__stock_item__model", "processed_by")
+    returns = Return.objects.select_related("sale_item__sale", "sale_item__stock_item__category", "sale_item__stock_item__model", "processed_by", "return_category")
     sheets.append((
         "Returns",
         ("Invoice", "Category", "Model", "IMEI", "Return Date", "Category of Issue", "Status", "Processed By", "Description"),
         [
             (
                 r.sale_item.sale.invoice_number, r.sale_item.stock_item.category.name, r.sale_item.stock_item.model.name,
-                r.sale_item.imei, r.return_date, r.get_return_category_display(), r.get_status_display(),
+                r.sale_item.imei, r.return_date, r.return_category.name, r.get_status_display(),
                 r.processed_by.get_full_name() or r.processed_by.username, r.description,
             )
             for r in returns.order_by("-return_date")

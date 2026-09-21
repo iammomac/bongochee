@@ -13,6 +13,7 @@ from catalog.services import get_or_create_category, get_or_create_model
 from rbac.permissions import HasPermission
 from stock.models import StockIn, StockItem
 from activitylog.services import log_action
+from stock.search import apply_stock_search
 from stock.serializers import StockInSerializer, StockItemEditSerializer, StockItemSerializer
 
 # Who may see the stock list: anyone who stocks, sells, edits or deletes stock needs the rows.
@@ -58,7 +59,11 @@ class StockItemViewSet(
         "model": ["exact"],
         "quantity_remaining": ["exact", "gt"],
     }
-    search_fields = ["category__name", "model__name", "stock_in__supplier__name", "stock_in__invoice_number", "notes"]
+
+    def filter_queryset(self, queryset):
+        # ?search= matches anything shown in the table -- see stock/search.py.
+        queryset = super().filter_queryset(queryset)
+        return apply_stock_search(queryset, self.request.query_params.get("search"))
 
     def get_permissions(self):
         if self.action in ("update", "partial_update"):

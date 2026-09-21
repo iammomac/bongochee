@@ -1,6 +1,13 @@
 from rest_framework import serializers
 
-from returns_app.models import Return, ReturnPhoto
+from returns_app.models import Return, ReturnCategory, ReturnPhoto
+
+
+class ReturnCategorySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ReturnCategory
+        fields = ("id", "name", "created_at")
+        read_only_fields = ("id", "created_at")
 
 
 class ReturnPhotoSerializer(serializers.ModelSerializer):
@@ -35,7 +42,7 @@ class ReturnSerializer(serializers.ModelSerializer):
     customer_name = serializers.CharField(source="sale_item.sale.customer_name", read_only=True)
     category_name = serializers.CharField(source="sale_item.stock_item.category.name", read_only=True)
     model_name = serializers.CharField(source="sale_item.stock_item.model.name", read_only=True)
-    return_category_display = serializers.CharField(source="get_return_category_display", read_only=True)
+    return_category_display = serializers.CharField(source="return_category.name", read_only=True)
 
     class Meta:
         model = Return

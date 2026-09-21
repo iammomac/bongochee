@@ -9,10 +9,23 @@ export async function lookupSaleItem(query: string) {
   return data;
 }
 
+export async function searchReturnCategories(query: string) {
+  const { data } = await api.get<Paginated<ReturnCategory> | ReturnCategory[]>("/returns/categories/", {
+    params: query ? { search: query } : undefined,
+  });
+  return unwrapList(data);
+}
+
+// Adding one that already exists (in any letter case) just hands back the existing one.
+export async function getOrCreateReturnCategory(name: string) {
+  const { data } = await api.post<ReturnCategory>("/returns/categories/", { name });
+  return data;
+}
+
 export interface ReturnCreatePayload {
   saleItem: string;
   returnDate: string;
-  returnCategory: ReturnCategory;
+  returnCategory: string; // ReturnCategory id
   description?: string;
 }
 
@@ -41,7 +54,7 @@ export async function updateReturnStatus(id: string, status: ReturnStatus) {
 
 export interface ReturnUpdatePayload {
   returnDate?: string;
-  returnCategory?: ReturnCategory;
+  returnCategory?: string; // ReturnCategory id
   description?: string;
 }
 

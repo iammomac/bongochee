@@ -2,7 +2,7 @@ from django.core.exceptions import ValidationError
 from django.core.validators import FileExtensionValidator
 from django.db.models import Q, Value
 from django.db.models.functions import Concat, Lower, Replace
-from rest_framework import status, viewsets
+from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.parsers import MultiPartParser
 from rest_framework.permissions import IsAuthenticated
@@ -13,8 +13,14 @@ from activitylog.services import log_action
 from config.validators import ALLOWED_IMAGE_EXTENSIONS, validate_image_size
 from notifications.services import notify_permission_holders
 from rbac.permissions import HasPermission
-from returns_app.models import Return, ReturnPhoto
-from returns_app.serializers import ReturnPhotoSerializer, ReturnSerializer, SaleItemLookupSerializer
+from returns_app.models import Return, ReturnCategory, ReturnPhoto
+from returns_app.serializers import (
+    ReturnCategorySerializer,
+    ReturnPhotoSerializer,
+    ReturnSerializer,
+    SaleItemLookupSerializer,
+)
+from returns_app.services import get_or_create_return_category
 from sales.models import SaleItem
 
 # A popular model can have dozens of sales, and the person picks the customer from the list.
@@ -72,9 +78,44 @@ class SaleItemLookupView(APIView):
         return Response(SaleItemLookupSerializer(matches, many=True).data)
 
 
+class ReturnCategoryViewSet(mixins.ListModelMixin, mixins.CreateModelMixin, viewsets.GenericViewSet):
+    """The kinds of fault a return can be filed under. Listing is what the picker searches;
+    creating is get-or-create by name, so adding one that already exists (in any letter case)
+    just returns it."""
+
+    queryset = ReturnCategory.objects.all()
+    serializer_class = ReturnCategorySerializer
+    permission_classes = [IsAuthenticated, HasPermission]
+    required_permission = ("create_returns", "edit_returns")
+    search_fields = ["name"]
+
+    def create(self, request, *args, **kwargs):
+        name = " ".join((request.data.get("name") or "").split())
+        if not name:
+            return Response({"detail": "Name is required"}, status=status.HTTP_400_BAD_REQUEST)
+        max_length = ReturnCategory._meta.get_field("name").max_length
+        if len(name) > max_length:
+            return Response(
+                {"detail": f"Keep the name to {max_length} characters or fewer."}, status=status.HTTP_400_BAD_REQUEST
+            )
+        category, created = get_or_create_return_category(name)
+        if created:
+            log_action(user=request.user, action="return_category.create", request=request, name=category.name)
+        return Response(
+            ReturnCategorySerializer(category).data,
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
+
+
 class ReturnViewSet(viewsets.ModelViewSet):
     queryset = (
-        Return.objects.select_related("sale_item__sale__sold_by", "sale_item__stock_item__category", "sale_item__stock_item__model", "processed_by")
+        Return.objects.select_related(
+            "sale_item__sale__sold_by",
+            "sale_item__stock_item__category",
+            "sale_item__stock_item__model",
+            "processed_by",
+            "return_category",
+        )
         .prefetch_related("photos")
         .all()
     )
@@ -96,7 +137,7 @@ class ReturnViewSet(viewsets.ModelViewSet):
             title="New return filed",
             message=(
                 f"{stock_item.category.name} {stock_item.model.name} "
-                f"(IMEI {return_record.sale_item.imei}) — {return_record.get_return_category_display()}"
+                f"(IMEI {return_record.sale_item.imei}) — {return_record.return_category.name}"
             ),
             link="/returns",
             exclude_user=self.request.user,

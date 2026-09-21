@@ -450,3 +450,118 @@ class StockItemEditTests(APITestCase):
         self.assertEqual(len(first["results"]), 25)
         self.assertEqual(len(second["results"]), 7)
         self.assertFalse({r["id"] for r in first["results"]} & {r["id"] for r in second["results"]})
+
+
+class StockSearchTests(APITestCase):
+    """?search= on the stock list matches anything shown in the table."""
+
+    def setUp(self):
+        perm = Permission.objects.create(codename="edit_stock", label="Edit Stock", category="stock")
+        role = Role.objects.create(name="Stock editor")
+        role.permissions.add(perm)
+        self.user = User.objects.create_user(
+            username="searcher", password="Str0ngPassw0rd!", phone="255700000077", role=role, must_change_password=False
+        )
+        self.client.force_authenticate(self.user)
+
+        blue = Supplier.objects.create(name="Blue Telecom")
+        red = Supplier.objects.create(name="Red Mobile")
+        samsung = Category.objects.create(name="Samsung")
+        apple = Category.objects.create(name="Apple")
+
+        def line(supplier, brand, model_name, quantity, remaining, buying, imported, invoice="", notes=""):
+            model, _ = PhoneModel.objects.get_or_create(category=brand, name=model_name)
+            batch = StockIn.objects.create(
+                supplier=supplier, import_date=imported, invoice_number=invoice, created_by=self.user
+            )
+            return StockItem.objects.create(
+                stock_in=batch,
+                category=brand,
+                model=model,
+                quantity=quantity,
+                quantity_remaining=remaining,
+                buying_price=buying,
+                min_selling_price=buying + 100000,
+                max_selling_price=buying + 200000,
+                notes=notes,
+            )
+
+        self.s23 = line(blue, samsung, "Galaxy S23", 20, 12, 900000, date(2026, 9, 3), "INV-77", "full box")
+        self.a56 = line(red, samsung, "Galaxy A56", 10, 3, 500000, date(2026, 8, 15), "INV-88")
+        self.iphone = line(blue, apple, "iPhone 15", 8, 0, 1750000, date(2026, 9, 20), "INV-99", "used")
+
+    def _found(self, text):
+        res = self.client.get("/api/v1/stock/stock-items/", {"search": text})
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        return {row["modelName"] for row in res.json()["results"]}
+
+    def test_by_model_brand_supplier_invoice_and_notes(self):
+        self.assertEqual(self._found("s23"), {"Galaxy S23"})
+        self.assertEqual(self._found("apple"), {"iPhone 15"})
+        self.assertEqual(self._found("red mobile"), {"Galaxy A56"})
+        self.assertEqual(self._found("inv-99"), {"iPhone 15"})
+        self.assertEqual(self._found("full box"), {"Galaxy S23"})
+
+    def test_every_word_must_match_but_each_can_match_a_different_thing(self):
+        self.assertEqual(self._found("galaxy blue"), {"Galaxy S23"})  # model + supplier
+        self.assertEqual(self._found("samsung used"), set())  # no Samsung line is "used"
+
+    def test_by_quantity_received_or_in_stock(self):
+        self.assertEqual(self._found("20"), {"Galaxy S23"})  # received
+        self.assertEqual(self._found("12"), {"Galaxy S23"})  # in stock
+        # 3 is the A56's quantity in stock, and also part of the S23's model name.
+        self.assertEqual(self._found("3"), {"Galaxy A56", "Galaxy S23"})
+        self.assertEqual(self._found("received 10"), {"Galaxy A56"})  # the label word is ignored
+
+    def test_a_short_number_is_a_quantity_not_a_price_fragment(self):
+        zed = StockItem.objects.create(
+            stock_in=StockIn.objects.create(supplier=Supplier.objects.first(), import_date=date(2026, 12, 25), created_by=self.user),
+            category=Category.objects.get(name="Samsung"),
+            model=PhoneModel.objects.create(category=Category.objects.get(name="Samsung"), name="Zed"),
+            quantity=40,
+            quantity_remaining=40,
+            buying_price=300000,
+            min_selling_price=400000,
+            max_selling_price=500000,
+        )
+        # "3" sits inside 300000.00 but a short number isn't matched against prices...
+        self.assertNotIn("Zed", self._found("3"))
+        # ...while the full price is, and so is the exact quantity.
+        self.assertIn("Zed", self._found("300000"))
+        self.assertEqual(self._found("40"), {"Zed"})
+        self.assertEqual(zed.quantity, 40)
+
+    def test_by_price(self):
+        self.assertEqual(self._found("900000"), {"Galaxy S23"})  # buying price
+        self.assertEqual(self._found("1,750,000"), {"iPhone 15"})
+        self.assertEqual(self._found("600000"), {"Galaxy A56"})  # min selling price
+        self.assertEqual(self._found("1000000"), {"Galaxy S23"})  # 900000 + 100000 min selling
+
+    def test_by_date_year_month_or_exact_day(self):
+        self.assertEqual(self._found("2026-08"), {"Galaxy A56"})
+        self.assertEqual(self._found("2026-09-03"), {"Galaxy S23"})
+        self.assertEqual(self._found("03/09/2026"), {"Galaxy S23"})
+        self.assertEqual(self._found("2026"), {"Galaxy S23", "Galaxy A56", "iPhone 15"})
+        self.assertEqual(self._found("sep"), {"Galaxy S23", "iPhone 15"})
+        self.assertEqual(self._found("august"), {"Galaxy A56"})
+
+    def test_by_status(self):
+        self.assertEqual(self._found("out of stock"), {"iPhone 15"})
+        self.assertEqual(self._found("sold out"), {"iPhone 15"})
+        self.assertEqual(self._found("low"), {"Galaxy A56"})  # 3 left
+        self.assertEqual(self._found("low stock"), {"Galaxy A56"})
+        self.assertEqual(self._found("healthy"), {"Galaxy S23"})
+        self.assertEqual(self._found("in stock"), {"Galaxy S23", "Galaxy A56"})
+
+    def test_status_words_combine_with_other_words(self):
+        self.assertEqual(self._found("samsung low"), {"Galaxy A56"})
+        self.assertEqual(self._found("blue out of stock"), {"iPhone 15"})
+
+    def test_search_is_case_insensitive_and_blank_shows_everything(self):
+        self.assertEqual(self._found("GALAXY S23"), {"Galaxy S23"})
+        self.assertEqual(len(self._found("   ")), 3)
+        self.assertEqual(self._found("nothing like this"), set())
+
+    def test_search_still_works_with_the_sales_style_filter(self):
+        res = self.client.get("/api/v1/stock/stock-items/", {"search": "iphone", "quantity_remaining__gt": 0})
+        self.assertEqual(res.json()["results"], [])

@@ -200,8 +200,13 @@ export interface LoanSummary {
   };
 }
 
-export type ReturnCategory =
-  | "display" | "battery" | "charging" | "camera" | "speaker" | "software" | "network" | "other";
+// A kind of fault a return is filed under ("Battery", "Water damage"...) -- picked from the
+// existing ones or added on the spot.
+export interface ReturnCategory {
+  id: string;
+  name: string;
+  createdAt: string;
+}
 
 export type ReturnStatus = "pending" | "processing" | "resolved" | "cancelled";
 
@@ -231,8 +236,8 @@ export interface ReturnRecord {
   categoryName: string;
   modelName: string;
   returnDate: string;
-  returnCategory: ReturnCategory;
-  returnCategoryDisplay: string;
+  returnCategory: string; // the ReturnCategory's id
+  returnCategoryDisplay: string; // and its name
   description: string;
   status: ReturnStatus;
   processedBy: string;

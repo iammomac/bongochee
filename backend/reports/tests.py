@@ -9,10 +9,14 @@ from rest_framework.test import APITestCase
 from accounts.models import PasswordChangeRequest, User
 from catalog.models import Category, PhoneModel
 from rbac.models import Permission, Role
-from returns_app.models import Return
+from returns_app.models import Return, ReturnCategory
 from sales.models import Sale, SaleItem
 from stock.models import StockIn, StockItem
 from suppliers.models import Supplier
+
+
+def return_category(name):
+    return ReturnCategory.objects.get_or_create(name=name)[0]
 
 
 class DashboardSummaryTests(APITestCase):
@@ -71,7 +75,7 @@ class DashboardSummaryTests(APITestCase):
         Return.objects.create(
             sale_item=self.sale_item,
             return_date=date.today(),
-            return_category="battery",
+            return_category=return_category("Battery"),
             processed_by=self.user,
         )
         res = self.client.get("/api/v1/reports/dashboard-summary/")
@@ -79,11 +83,11 @@ class DashboardSummaryTests(APITestCase):
 
     def test_pending_returns_counts_pending_and_processing_only(self):
         resolved = Return.objects.create(
-            sale_item=self.sale_item, return_date=date.today(), return_category="battery",
+            sale_item=self.sale_item, return_date=date.today(), return_category=return_category("Battery"),
             status="resolved", processed_by=self.user,
         )
         Return.objects.create(
-            sale_item=self.sale_item, return_date=date.today(), return_category="camera",
+            sale_item=self.sale_item, return_date=date.today(), return_category=return_category("Camera"),
             status="pending", processed_by=self.user,
         )
         res = self.client.get("/api/v1/reports/dashboard-summary/")
@@ -175,7 +179,7 @@ class ReportFixtures(APITestCase):
         Return.objects.create(
             sale_item=self.profitable_item,
             return_date=date.today(),
-            return_category="battery",
+            return_category=return_category("Battery"),
             processed_by=self.salesperson,
         )
 

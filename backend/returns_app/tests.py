@@ -9,7 +9,7 @@ from rest_framework.test import APITestCase
 from accounts.models import User
 from catalog.models import Category, PhoneModel
 from rbac.models import Permission, Role
-from returns_app.models import ReturnPhoto
+from returns_app.models import ReturnCategory, ReturnPhoto
 from sales.models import Sale, SaleItem
 from stock.models import StockIn, StockItem
 from suppliers.models import Supplier
@@ -149,13 +149,85 @@ class ReturnsTests(APITestCase):
         self.assertEqual(len(rows), 30)
         self.assertEqual(rows[0]["customerName"], "Buyer 34")
 
+    def _category(self, name="Battery"):
+        return ReturnCategory.objects.get_or_create(name=name)[0]
+
     def _return_payload(self):
         return {
             "saleItem": str(self.sale_item.id),
             "returnDate": str(date.today()),
-            "returnCategory": "battery",
+            "returnCategory": str(self._category().id),
             "description": "Battery drains fast",
         }
+
+    def test_the_original_kinds_of_fault_are_already_available(self):
+        names = [row["name"] for row in self.client.get("/api/v1/returns/categories/").json()["results"]]
+        for expected in ("Battery", "Camera", "Charging", "Display", "Network", "Other", "Software", "Speaker"):
+            self.assertIn(expected, names)
+
+    def test_a_new_return_category_can_be_added_and_used(self):
+        res = self.client.post("/api/v1/returns/categories/", {"name": "Water damage"}, format="json")
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+        new_id = res.json()["id"]
+        self.assertEqual(res.json()["name"], "Water damage")
+
+        payload = {**self._return_payload(), "returnCategory": new_id}
+        created = self.client.post("/api/v1/returns/returns/", payload, format="json")
+        self.assertEqual(created.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(created.json()["returnCategoryDisplay"], "Water damage")
+        self.assertEqual(created.json()["returnCategory"], new_id)
+
+    def test_adding_a_category_that_exists_returns_it_instead_of_a_duplicate(self):
+        first = self.client.post("/api/v1/returns/categories/", {"name": "Water damage"}, format="json").json()
+        again = self.client.post("/api/v1/returns/categories/", {"name": "  water   DAMAGE "}, format="json")
+        self.assertEqual(again.status_code, status.HTTP_200_OK)
+        self.assertEqual(again.json()["id"], first["id"])
+        self.assertEqual(ReturnCategory.objects.filter(name__iexact="water damage").count(), 1)
+
+    def test_a_blank_or_overlong_category_name_is_refused(self):
+        self.assertEqual(
+            self.client.post("/api/v1/returns/categories/", {"name": "   "}, format="json").status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
+        self.assertEqual(
+            self.client.post("/api/v1/returns/categories/", {"name": "x" * 61}, format="json").status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+    def test_categories_can_be_searched_by_name(self):
+        names = [row["name"] for row in self.client.get("/api/v1/returns/categories/", {"search": "bat"}).json()["results"]]
+        self.assertEqual(names, ["Battery"])
+
+    def test_someone_who_cannot_file_returns_cannot_list_or_add_categories(self):
+        self.client.force_authenticate(User.objects.create_user(
+            username="nobody", password="Str0ngPassw0rd!", phone="255700000088", must_change_password=False
+        ))
+        self.assertEqual(self.client.get("/api/v1/returns/categories/").status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(
+            self.client.post("/api/v1/returns/categories/", {"name": "Water damage"}, format="json").status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+
+    def test_a_return_needs_a_real_category(self):
+        payload = {**self._return_payload(), "returnCategory": "battery"}
+        self.assertEqual(
+            self.client.post("/api/v1/returns/returns/", payload, format="json").status_code, status.HTTP_400_BAD_REQUEST
+        )
+
+    def test_a_return_can_be_moved_to_another_category(self):
+        created = self.client.post("/api/v1/returns/returns/", self._return_payload(), format="json").json()
+        new = self.client.post("/api/v1/returns/categories/", {"name": "Water damage"}, format="json").json()
+        res = self.client.patch(f"/api/v1/returns/returns/{created['id']}/", {"returnCategory": new["id"]}, format="json")
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(res.json()["returnCategoryDisplay"], "Water damage")
+
+    def test_returns_report_groups_by_the_new_category_too(self):
+        self.client.post("/api/v1/returns/returns/", {**self._return_payload(), "returnCategory": str(self._category("Water damage").id)}, format="json")
+        # The reports need view_reports on top of returns access.
+        self.user.role.permissions.add(Permission.objects.create(codename="view_reports", label="View Reports", category="reports"))
+        res = self.client.get("/api/v1/reports/returns-summary/", {"date_from": str(date.today()), "date_to": str(date.today())})
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual([(row["label"], row["count"]) for row in res.json()["rows"]], [("Water damage", 1)])
 
     def test_duplicate_pending_return_is_rejected(self):
         res = self.client.post("/api/v1/returns/returns/", self._return_payload(), format="json")

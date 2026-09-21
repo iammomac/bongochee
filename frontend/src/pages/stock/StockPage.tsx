@@ -516,10 +516,16 @@ export default function StockPage() {
     loadItems();
   }, [loadItems]);
 
-  // Search as you type, after a short pause, always from the first page.
+  // Search as you type, after a short pause, always from the first page. Only when the text
+  // really changed -- otherwise the pause after the page first opens would send someone who
+  // has already clicked "Next" back to page 1.
+  const appliedSearch = useRef("");
   useEffect(() => {
     const id = setTimeout(() => {
-      setSearch(searchText.trim());
+      const next = searchText.trim();
+      if (next === appliedSearch.current) return;
+      appliedSearch.current = next;
+      setSearch(next);
       setPage(1);
     }, 300);
     return () => clearTimeout(id);
@@ -742,7 +748,7 @@ export default function StockPage() {
         <input
           value={searchText}
           onChange={(e) => setSearchText(e.target.value)}
-          placeholder="Search stock by model, brand, supplier, invoice or notes"
+          placeholder="Search anything: model, brand, supplier, quantity, price, date, low, out of stock…"
           aria-label="Search stock"
           className="w-full bg-transparent text-sm outline-none"
         />

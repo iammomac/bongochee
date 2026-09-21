@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Check, ChevronDown, Pencil, Plus, Search, Upload, X } from "lucide-react";
-import { Select } from "../../components/Select";
+import { ReturnCategoryPicker } from "../../components/ReturnCategoryPicker";
 import { useDropdownPosition } from "../../hooks/useDropdownPosition";
 import {
   createReturn,
@@ -15,17 +15,6 @@ import { formatDateTime, todayIso } from "../../lib/dates";
 import { extractErrorMessage } from "../../lib/errors";
 import { usePermissions } from "../../hooks/usePermissions";
 import type { ReturnCategory, ReturnRecord, ReturnStatus, SaleItemLookupResult } from "../../types";
-
-const RETURN_CATEGORIES: { value: ReturnCategory; label: string }[] = [
-  { value: "display", label: "Display" },
-  { value: "battery", label: "Battery" },
-  { value: "charging", label: "Charging" },
-  { value: "camera", label: "Camera" },
-  { value: "speaker", label: "Speaker" },
-  { value: "software", label: "Software" },
-  { value: "network", label: "Network" },
-  { value: "other", label: "Other" },
-];
 
 const RETURN_STATUSES: ReturnStatus[] = ["pending", "processing", "resolved", "cancelled"];
 
@@ -110,7 +99,11 @@ interface EditReturnModalProps {
 
 function EditReturnModal({ returnRecord, onClose, onSaved }: EditReturnModalProps) {
   const [returnDate, setReturnDate] = useState(returnRecord.returnDate);
-  const [returnCategory, setReturnCategory] = useState<ReturnCategory>(returnRecord.returnCategory);
+  const [returnCategory, setReturnCategory] = useState<ReturnCategory>({
+    id: returnRecord.returnCategory,
+    name: returnRecord.returnCategoryDisplay,
+    createdAt: "",
+  });
   const [description, setDescription] = useState(returnRecord.description);
   const [submitting, setSubmitting] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
@@ -119,7 +112,7 @@ function EditReturnModal({ returnRecord, onClose, onSaved }: EditReturnModalProp
     setSubmitting(true);
     setServerError(null);
     try {
-      await updateReturn(returnRecord.id, { returnDate, returnCategory, description });
+      await updateReturn(returnRecord.id, { returnDate, returnCategory: returnCategory.id, description });
       onSaved();
       onClose();
     } catch (err) {
@@ -165,13 +158,7 @@ function EditReturnModal({ returnRecord, onClose, onSaved }: EditReturnModalProp
             </div>
             <div>
               <label className="mb-1 block text-xs font-medium text-gray-500">Return category</label>
-              <Select value={returnCategory} onChange={(v) => setReturnCategory(v as ReturnCategory)}>
-                {RETURN_CATEGORIES.map((cat) => (
-                  <option key={cat.value} value={cat.value}>
-                    {cat.label}
-                  </option>
-                ))}
-              </Select>
+              <ReturnCategoryPicker value={returnCategory} onSelect={setReturnCategory} />
             </div>
           </div>
           <div>
@@ -217,7 +204,7 @@ export default function ReturnsPage() {
   const [selected, setSelected] = useState<SaleItemLookupResult | null>(null);
 
   const [returnDate, setReturnDate] = useState(todayIso());
-  const [returnCategory, setReturnCategory] = useState<ReturnCategory>("battery");
+  const [returnCategory, setReturnCategory] = useState<ReturnCategory | null>(null);
   const [description, setDescription] = useState("");
   const [photos, setPhotos] = useState<File[]>([]);
   const [submitting, setSubmitting] = useState(false);
@@ -260,7 +247,7 @@ export default function ReturnsPage() {
     setResults([]);
     setSearched(false);
     setReturnDate(todayIso());
-    setReturnCategory("battery");
+    setReturnCategory(null);
     setDescription("");
     setPhotos([]);
   };
@@ -271,14 +258,14 @@ export default function ReturnsPage() {
   };
 
   const handleSubmit = async () => {
-    if (!selected) return;
+    if (!selected || !returnCategory) return;
     setSubmitting(true);
     setError(null);
     try {
       const created = await createReturn({
         saleItem: selected.id,
         returnDate,
-        returnCategory,
+        returnCategory: returnCategory.id,
         description,
       });
       for (const file of photos) {
@@ -424,13 +411,7 @@ export default function ReturnsPage() {
               </div>
               <div>
                 <label className="mb-1 block text-xs font-medium text-gray-500">Return category</label>
-                <Select value={returnCategory} onChange={(v) => setReturnCategory(v as ReturnCategory)}>
-                  {RETURN_CATEGORIES.map((cat) => (
-                    <option key={cat.value} value={cat.value}>
-                      {cat.label}
-                    </option>
-                  ))}
-                </Select>
+                <ReturnCategoryPicker value={returnCategory} onSelect={setReturnCategory} />
               </div>
             </div>
             <div>
@@ -488,7 +469,8 @@ export default function ReturnsPage() {
               <button
                 type="button"
                 onClick={() => void handleSubmit()}
-                disabled={submitting}
+                disabled={submitting || !returnCategory}
+                title={returnCategory ? undefined : "Pick or add a return category first"}
                 className="flex-1 rounded-xl bg-primary py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
               >
                 {submitting ? "Saving…" : "Record return"}

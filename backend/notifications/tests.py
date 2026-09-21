@@ -10,7 +10,7 @@ from catalog.models import Category, PhoneModel
 from notifications.models import Notification
 from notifications.services import notify_permission_holders
 from rbac.models import Permission, Role
-from returns_app.models import Return
+from returns_app.models import Return, ReturnCategory
 from sales.models import Sale, SaleItem
 from stock.models import StockIn, StockItem
 from suppliers.models import Supplier
@@ -187,7 +187,7 @@ class EventNotificationTests(APITestCase):
             {
                 "saleItem": str(sale_item.id),
                 "returnDate": str(date.today()),
-                "returnCategory": "battery",
+                "returnCategory": str(ReturnCategory.objects.get_or_create(name="Battery")[0].id),
                 "description": "Battery drains fast",
             },
             format="json",
