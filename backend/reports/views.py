@@ -11,6 +11,7 @@ from rest_framework.views import APIView
 
 from accounts.models import PasswordChangeRequest, User
 from activitylog.services import log_action
+from config.throttles import LiveRefreshRateThrottle
 from loans.permissions import HasAnyLoanPermission
 from rbac.permissions import HasPermission, IsAdminOrSuper, user_has_permission
 from reports import services
@@ -45,6 +46,8 @@ def _revenue_trend(today):
 class DashboardSummaryView(APIView):
     permission_classes = [IsAuthenticated, HasPermission]
     required_permission = "view_dashboard"
+    # The dashboard refreshes itself every few seconds -- see LiveRefreshRateThrottle.
+    throttle_classes = [LiveRefreshRateThrottle]
 
     def get(self, request):
         today = timezone.localdate()
@@ -66,8 +69,13 @@ class DashboardSummaryView(APIView):
             "revenue_trend": _revenue_trend(today),
         }
         serializer = DashboardSummarySerializer(summary)
-        log_action(user=request.user, action="report.dashboard", request=request)
-        return Response(serializer.data)
+        # Opening the dashboard is logged; the page's timed refreshes (?live=1) are not, or
+        # one open tab would write thousands of rows a day.
+        if not request.query_params.get("live"):
+            log_action(user=request.user, action="report.dashboard", request=request)
+        response = Response(serializer.data)
+        response["Cache-Control"] = "no-store"  # always today's figures, never a stored copy
+        return response
 
 
 def _parse_date(value, default):

@@ -6,6 +6,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from activitylog.services import log_action
+from config.throttles import LiveRefreshRateThrottle
 from loans import services
 from loans.models import LoanPayment, LoanSale, LoanSaleItem
 from loans.permissions import ANY_LOAN_PERMISSION
@@ -101,7 +102,7 @@ class LoanSaleViewSet(viewsets.ModelViewSet):
         loan_sale = self.get_queryset().get(pk=loan_sale.pk)
         return Response(LoanSaleSerializer(loan_sale, context={"request": request}).data)
 
-    @action(detail=False, methods=["get"], url_path="summary")
+    @action(detail=False, methods=["get"], url_path="summary", throttle_classes=[LiveRefreshRateThrottle])
     def summary(self, request):
         """Chart data: per-day loans/revenue/expected profit for the last `days` days,
         plus the whole book's paid-vs-owed position."""
@@ -116,4 +117,6 @@ class LoanSaleViewSet(viewsets.ModelViewSet):
             data["totals"].pop("expected_profit")
             for point in data["trend"]:
                 point.pop("expected_profit")
-        return Response(data)
+        response = Response(data)
+        response["Cache-Control"] = "no-store"  # the chart refreshes itself; never serve an old copy
+        return response

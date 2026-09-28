@@ -100,6 +100,59 @@ class DashboardSummaryTests(APITestCase):
         res = self.client.get("/api/v1/reports/dashboard-summary/")
         self.assertEqual(res.json()["pendingPasswordRequests"], 1)
 
+    URL = "/api/v1/reports/dashboard-summary/"
+
+    def _trend(self):
+        return self.client.get(self.URL).json()["revenueTrend"]
+
+    def test_an_edited_price_shows_on_the_next_request_to_the_shilling(self):
+        before = self._trend()[-1]["revenue"]
+        self.assertEqual(before, 600000.0)
+
+        self.sale_item.selling_price = "650010"  # a TZS 10 correction
+        self.sale_item.save()
+
+        self.assertEqual(self._trend()[-1]["revenue"], 600010.0)
+        self.assertEqual(float(self.client.get(self.URL).json()["todaysProfit"]), 100010.0)
+
+    def test_an_edit_to_an_earlier_days_sale_shows_in_that_days_point(self):
+        Sale.objects.filter(pk=self.sale_item.sale_id).update(created_at=timezone.now() - timedelta(days=2))
+        self.sale_item.refresh_from_db()
+        self.assertEqual(self._trend()[-3]["revenue"], 600000.0)
+
+        self.sale_item.selling_price = "650010"
+        self.sale_item.save()
+
+        trend = self._trend()
+        self.assertEqual(trend[-3]["revenue"], 600010.0)
+        self.assertEqual(trend[-1]["revenue"], 0)  # today is untouched
+
+    def test_the_response_may_not_be_cached(self):
+        self.assertEqual(self.client.get(self.URL)["Cache-Control"], "no-store")
+
+    def test_opening_the_dashboard_is_logged_but_timed_refreshes_are_not(self):
+        from activitylog.models import ActivityLog
+
+        self.client.get(self.URL)
+        self.assertEqual(ActivityLog.objects.filter(action="report.dashboard").count(), 1)
+
+        for _ in range(3):
+            self.assertEqual(self.client.get(self.URL, {"live": 1}).status_code, status.HTTP_200_OK)
+        self.assertEqual(ActivityLog.objects.filter(action="report.dashboard").count(), 1)
+
+    def test_the_screens_that_refresh_on_a_timer_use_their_own_rate_limit(self):
+        from django.conf import settings
+
+        from config.throttles import LiveRefreshRateThrottle
+        from loans.views import LoanSaleViewSet
+        from notifications.views import NotificationViewSet
+        from reports.views import DashboardSummaryView
+
+        self.assertIn("live", settings.REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"])
+        self.assertEqual(DashboardSummaryView.throttle_classes, [LiveRefreshRateThrottle])
+        self.assertEqual(NotificationViewSet.throttle_classes, [LiveRefreshRateThrottle])
+        self.assertEqual(LoanSaleViewSet.summary.kwargs["throttle_classes"], [LiveRefreshRateThrottle])
+
 
 class ReportFixtures(APITestCase):
     """One sale of three units of one model (one profitable, one below buying price,

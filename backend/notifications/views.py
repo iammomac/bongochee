@@ -3,6 +3,7 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from config.throttles import LiveRefreshRateThrottle
 from notifications.models import Notification
 from notifications.serializers import NotificationSerializer
 
@@ -13,6 +14,8 @@ class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
 
     serializer_class = NotificationSerializer
     permission_classes = [IsAuthenticated]
+    # The bell polls this all day -- see LiveRefreshRateThrottle.
+    throttle_classes = [LiveRefreshRateThrottle]
 
     def get_queryset(self):
         return Notification.objects.filter(recipient=self.request.user)

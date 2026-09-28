@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
@@ -15,6 +15,8 @@ import {
   AlertTriangle,
   ArrowDownRight,
   ArrowUpRight,
+  Banknote,
+  CalendarDays,
   CheckCircle2,
   KeyRound,
   Package,
@@ -26,6 +28,7 @@ import { LoanCharts } from "../../components/LoanCharts";
 import { getDashboardSummary } from "../../services/dashboard";
 import type { DashboardSummary, RevenueTrendPoint } from "../../services/dashboard";
 import { usePermissions } from "../../hooks/usePermissions";
+import { useLiveRefresh } from "../../hooks/useLiveRefresh";
 
 const currency = (value: number) =>
   new Intl.NumberFormat("en-TZ", { maximumFractionDigits: 0 }).format(value);
@@ -129,27 +132,25 @@ function RevenueTrendChart({ trend }: { trend: RevenueTrendPoint[] }) {
   );
 }
 
+// The trend runs oldest to newest and always ends on today.
+const todaysRevenue = (s: DashboardSummary | null) => s?.revenueTrend.at(-1)?.revenue ?? 0;
+const trendRevenue = (s: DashboardSummary | null) => (s?.revenueTrend ?? []).reduce((sum, p) => sum + p.revenue, 0);
+
 const cards: Array<{
-  key: "todaysSales" | "todaysProfit" | "todaysReturns" | "remainingStock";
   label: string;
   icon: typeof ShoppingCart;
+  value: (s: DashboardSummary | null) => number;
   prefix?: string;
   suffix?: string;
 }> = [
-  {
-    key: "todaysSales",
-    label: "Today's Sales",
-    icon: ShoppingCart,
-    suffix: " units",
-  },
-  {
-    key: "todaysProfit",
-    label: "Today's Profit",
-    icon: TrendingUp,
-    prefix: "TZS ",
-  },
-  { key: "todaysReturns", label: "Today's Returns", icon: RotateCcw },
-  { key: "remainingStock", label: "Remaining Stock", icon: Package },
+  { label: "Today's Sales", icon: ShoppingCart, suffix: " units", value: (s) => s?.todaysSales ?? 0 },
+  { label: "Today's Revenue", icon: Banknote, prefix: "TZS ", value: todaysRevenue },
+  { label: "Today's Profit", icon: TrendingUp, prefix: "TZS ", value: (s) => s?.todaysProfit ?? 0 },
+  // Exact to the shilling, so a correction to any sale in the last two weeks shows up here
+  // even when it's too small to move the chart.
+  { label: "Revenue, last 14 days", icon: CalendarDays, prefix: "TZS ", value: trendRevenue },
+  { label: "Today's Returns", icon: RotateCcw, value: (s) => s?.todaysReturns ?? 0 },
+  { label: "Remaining Stock", icon: Package, value: (s) => s?.remainingStock ?? 0 },
 ];
 
 interface PriorityItem {
@@ -215,14 +216,28 @@ const TONE_STYLES: Record<PriorityItem["tone"], string> = {
 export default function DashboardPage() {
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
+  const hasData = useRef(false);
   const { has } = usePermissions();
   const navigate = useNavigate();
 
-  useEffect(() => {
-    void getDashboardSummary()
-      .then(setSummary)
-      .catch(() => setError("Unable to load dashboard summary"));
+  const load = useCallback((live = false) => {
+    void getDashboardSummary({ live })
+      .then((data) => {
+        hasData.current = true;
+        setSummary(data);
+        setError(null);
+        setUpdatedAt(new Date());
+      })
+      .catch(() => {
+        // A failed refresh keeps the numbers already on screen (they're just a little older);
+        // only a failed first load has nothing to show.
+        if (!hasData.current) setError("Unable to load dashboard summary");
+      });
   }, []);
+
+  useEffect(() => load(), [load]);
+  useLiveRefresh(() => load(true));
 
   const trend = summary?.revenueTrend ?? [];
   const today = trend[trend.length - 1];
@@ -243,8 +258,12 @@ export default function DashboardPage() {
           </p>
           <h1 className="text-3xl font-semibold">Bongo Chee command center</h1>
         </div>
-        <div className="rounded-full border border-primary/20 bg-primary/10 px-4 py-2 text-sm font-medium text-primary">
-          Live inventory intelligence
+        <div className="flex items-center gap-2 rounded-full border border-primary/20 bg-primary/10 px-4 py-2 text-sm font-medium text-primary">
+          <span className="relative flex h-2 w-2" aria-hidden>
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-60" />
+            <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
+          </span>
+          Live{updatedAt ? ` · updated ${updatedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : ""}
         </div>
       </div>
 
@@ -252,9 +271,9 @@ export default function DashboardPage() {
         <div className="card p-4 text-sm text-danger">{error}</div>
       ) : null}
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {cards.map(({ key, label, icon: Icon, prefix, suffix }) => {
-          const value = summary?.[key] ?? 0;
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {cards.map(({ label, icon: Icon, prefix, suffix, value: valueOf }) => {
+          const value = valueOf(summary);
           return (
             <motion.div
               key={label}

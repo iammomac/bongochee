@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { BarChart3, HandCoins, Table2 } from "lucide-react";
 import { getLoanSummary } from "../services/loans";
 import { usePermissions } from "../hooks/usePermissions";
+import { useLiveRefresh } from "../hooks/useLiveRefresh";
 import { formatDayMonth } from "../lib/dates";
 import { currency } from "../lib/money";
 import type { LoanSummary, LoanTrendPoint } from "../types";
@@ -256,6 +257,23 @@ export function LoanCharts({ days, refreshKey = 0, showLoansPerDay = false }: Lo
       cancelled = true;
     };
   }, [days, refreshKey]);
+
+  // Keeps the chart current on its own, quietly: no loading state, and a failed refresh
+  // leaves what is already drawn.
+  const currentDays = useRef(days);
+  useEffect(() => {
+    currentDays.current = days;
+  });
+  useLiveRefresh(() => {
+    const asked = days;
+    getLoanSummary(asked)
+      .then((data) => {
+        if (asked !== currentDays.current) return; // the range was changed while this was in flight
+        setSummary(data);
+        setError(null);
+      })
+      .catch(() => {});
+  });
 
   // The backend omits profit for users without view_profit; check both so a stale or
   // partial payload can never draw an empty profit series.
