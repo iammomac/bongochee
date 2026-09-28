@@ -61,4 +61,11 @@
   .no-print {
     display: none !important;
   }
+  /* On screen the receipt is height-capped and scrolls; on paper it prints in full. */
+  .receipt {
+    max-height: none !important;
+  }
+  .receipt-scroll {
+    overflow: visible !important;
+  }
 }

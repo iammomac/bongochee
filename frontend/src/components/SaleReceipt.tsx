@@ -1,4 +1,4 @@
-import { MessageCircle, Printer, X } from "lucide-react";
+import { MessageCircle, Pencil, Printer, X } from "lucide-react";
 import type { Sale } from "../types";
 import { openWhatsAppReceipt, saleTotal } from "../lib/whatsapp";
 import logo from "../assets/logo-trimmed.png";
@@ -8,9 +8,11 @@ const currency = (value: number) => new Intl.NumberFormat("en-TZ", { maximumFrac
 interface Props {
   sale: Sale;
   onClose: () => void;
+  // Shown as an "Edit sale" button when given (only to people who may edit sales).
+  onEdit?: () => void;
 }
 
-export function SaleReceipt({ sale, onClose }: Props) {
+export function SaleReceipt({ sale, onClose, onEdit }: Props) {
   const total = saleTotal(sale);
 
   // The real send already fires automatically right after the sale completes (see
@@ -21,8 +23,20 @@ export function SaleReceipt({ sale, onClose }: Props) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div className="no-print absolute inset-0" onClick={onClose} />
-      <div className="receipt relative w-full max-w-md rounded-2xl bg-white p-6 text-gray-900 shadow-2xl dark:bg-gray-900 dark:text-gray-100">
-        <div className="no-print mb-4 flex items-center justify-end gap-2">
+      {/* Capped at the window's height: the buttons stay put and the receipt itself scrolls, so
+          a sale with many phones can be read to the end. (Printing lifts the cap -- index.css.) */}
+      <div className="receipt relative flex max-h-full w-full max-w-md flex-col rounded-2xl bg-white text-gray-900 shadow-2xl dark:bg-gray-900 dark:text-gray-100">
+        <div className="no-print flex shrink-0 flex-wrap items-center justify-end gap-2 px-6 pb-3 pt-4">
+          {onEdit ? (
+            <button
+              type="button"
+              onClick={onEdit}
+              className="flex items-center gap-2 rounded-xl border border-gray-200 px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+            >
+              <Pencil size={14} />
+              Edit sale
+            </button>
+          ) : null}
           {sale.customerPhone ? (
             <button
               type="button"
@@ -51,6 +65,7 @@ export function SaleReceipt({ sale, onClose }: Props) {
           </button>
         </div>
 
+        <div className="receipt-scroll min-h-0 flex-1 overflow-y-auto px-6 pb-6">
         <div className="text-center">
           <img src={logo} alt="Bongo Chee" className="mx-auto h-12 w-auto" />
           <p className="text-xs text-gray-400">Mobile phone sales &amp; service</p>
@@ -112,6 +127,7 @@ export function SaleReceipt({ sale, onClose }: Props) {
         </div>
 
         <p className="mt-6 text-center text-xs text-gray-400">Thank you for shopping with BONGO CHEE</p>
+        </div>
       </div>
     </div>
   );

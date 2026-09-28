@@ -1,3 +1,4 @@
+from django.db import transaction
 from rest_framework import serializers
 
 from loans.models import LoanSaleItem
@@ -116,26 +117,46 @@ class SaleSerializer(serializers.ModelSerializer):
                 )
         return sale
 
+    @transaction.atomic
     def update(self, instance, validated_data):
         # Header fields (customer/payment/notes/invoice) are freely editable. Line
-        # items are matched by id and only selling_price/discount are ever touched —
-        # stock_item/imei are intentionally ignored even if the client sends different
-        # values, since swapping either here would desync StockItem.quantity_remaining
-        # (decremented once, at creation, in create() above) from reality.
+        # items are matched by id and only selling_price, discount and imei are ever
+        # touched -- stock_item is intentionally ignored even if the client sends a
+        # different one, since swapping the phone here would desync
+        # StockItem.quantity_remaining (decremented once, at creation, in create()
+        # above) from reality. The IMEI is only a label on the unit, so a typo in it
+        # can be corrected, as long as it doesn't clash with another sold phone.
         items_data = validated_data.pop("items", None)
+        items_by_id = {item.id: item for item in instance.items.all()}
+
+        # Checked before anything is written, so a clash leaves the sale untouched.
+        changes = []
+        seen_imeis = set()
+        for item_data in items_data or []:
+            item = items_by_id.get(item_data.get("id"))
+            if item is None:
+                continue  # adding/removing lines isn't supported through this endpoint
+            new_imei = item_data.get("imei") if "imei" in item_data else item.imei
+            if new_imei != item.imei and new_imei:
+                if (
+                    new_imei in seen_imeis
+                    or SaleItem.objects.filter(imei=new_imei).exclude(pk=item.pk).exists()
+                    or LoanSaleItem.objects.filter(imei=new_imei).exists()
+                ):
+                    raise serializers.ValidationError({"detail": f"IMEI {new_imei} is already recorded against another sale"})
+            if new_imei:
+                seen_imeis.add(new_imei)
+            changes.append((item, item_data, new_imei))
+
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
 
-        if items_data is not None:
-            items_by_id = {item.id: item for item in instance.items.all()}
-            for item_data in items_data:
-                item = items_by_id.get(item_data.get("id"))
-                if item is None:
-                    continue  # adding/removing lines isn't supported through this endpoint
-                if "selling_price" in item_data:
-                    item.selling_price = item_data["selling_price"]
-                if "discount" in item_data:
-                    item.discount = item_data["discount"]
-                item.save(update_fields=["selling_price", "discount"])
+        for item, item_data, new_imei in changes:
+            if "selling_price" in item_data:
+                item.selling_price = item_data["selling_price"]
+            if "discount" in item_data:
+                item.discount = item_data["discount"]
+            item.imei = new_imei
+            item.save(update_fields=["selling_price", "discount", "imei"])
         return instance

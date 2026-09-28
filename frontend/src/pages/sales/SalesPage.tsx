@@ -49,7 +49,8 @@ type EditHeaderValues = z.infer<typeof editHeaderSchema>;
 interface EditSaleModalProps {
   sale: Sale;
   onClose: () => void;
-  onSaved: () => void;
+  // Gets the sale as saved, so the caller can show its updated receipt.
+  onSaved: (updated: Sale) => void;
 }
 
 function EditSaleModal({ sale, onClose, onSaved }: EditSaleModalProps) {
@@ -73,11 +74,14 @@ function EditSaleModal({ sale, onClose, onSaved }: EditSaleModalProps) {
   const setItemField = (id: string, field: "sellingPrice" | "discount", value: number) => {
     setItems((prev) => prev.map((item) => (item.id === id ? { ...item, [field]: value } : item)));
   };
+  const setItemImei = (id: string, value: string) => {
+    setItems((prev) => prev.map((item) => (item.id === id ? { ...item, imei: value } : item)));
+  };
 
   const onSubmit = async (values: EditHeaderValues) => {
     setServerError(null);
     try {
-      await updateSale(sale.id, {
+      const updated = await updateSale(sale.id, {
         customerName: values.customerName,
         customerPhone: values.customerPhone,
         paymentMethod: values.paymentMethod as PaymentMethod,
@@ -85,13 +89,12 @@ function EditSaleModal({ sale, onClose, onSaved }: EditSaleModalProps) {
         items: items.map((item) => ({
           id: item.id,
           stockItem: item.stockItem,
-          imei: item.imei,
+          imei: item.imei?.trim() || null,
           sellingPrice: item.sellingPrice,
           discount: item.discount,
         })),
       });
-      onSaved();
-      onClose();
+      onSaved(updated); // the parent closes this form
     } catch (err) {
       setServerError(extractErrorMessage(err, "Unable to save these changes"));
     }
@@ -100,7 +103,7 @@ function EditSaleModal({ sale, onClose, onSaved }: EditSaleModalProps) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div className="absolute inset-0" onClick={onClose} />
-      <div className="relative w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl dark:bg-gray-900">
+      <div className="relative max-h-full w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl dark:bg-gray-900">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-semibold">Edit sale — {sale.invoiceNumber}</h2>
           <button
@@ -118,16 +121,22 @@ function EditSaleModal({ sale, onClose, onSaved }: EditSaleModalProps) {
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
           <div className="grid gap-3 md:grid-cols-2">
             <div>
-              <label className="mb-1 block text-xs font-medium text-gray-500">Customer name</label>
+              <label htmlFor="edit-customer-name" className="mb-1 block text-xs font-medium text-gray-500">
+                Customer name
+              </label>
               <input
+                id="edit-customer-name"
                 {...register("customerName")}
                 className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm outline-none focus:border-primary dark:border-gray-800 dark:bg-gray-950"
               />
               {errors.customerName ? <p className="mt-1 text-xs text-danger">{errors.customerName.message}</p> : null}
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-gray-500">Customer phone</label>
+              <label htmlFor="edit-customer-phone" className="mb-1 block text-xs font-medium text-gray-500">
+                Customer phone
+              </label>
               <input
+                id="edit-customer-phone"
                 {...register("customerPhone")}
                 className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm outline-none focus:border-primary dark:border-gray-800 dark:bg-gray-950"
               />
@@ -156,13 +165,24 @@ function EditSaleModal({ sale, onClose, onSaved }: EditSaleModalProps) {
           </div>
 
           <div className="space-y-2">
-            <p className="text-xs font-medium text-gray-500">Items — price and discount only; phone/IMEI can't change here</p>
+            <p className="text-xs font-medium text-gray-500">
+              Items — price, discount and IMEI can be corrected; the phone itself can't change here
+            </p>
             {items.map((item) => (
               <div key={item.id} className="rounded-2xl border border-gray-100 p-3 dark:border-gray-800">
-                <p className="text-sm font-medium">
+                <p className="mb-2 text-sm font-medium">
                   {item.categoryName} {item.modelName}
                 </p>
-                <p className="mb-2 text-xs text-gray-400">IMEI: {item.imei || "—"}</p>
+                <div className="mb-3">
+                  <label className="mb-1 block text-xs font-medium text-gray-500">IMEI</label>
+                  <input
+                    value={item.imei ?? ""}
+                    onChange={(e) => setItemImei(item.id, e.target.value)}
+                    placeholder="Not recorded"
+                    aria-label={`IMEI for ${item.categoryName} ${item.modelName}`}
+                    className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm outline-none focus:border-primary dark:border-gray-800 dark:bg-gray-950"
+                  />
+                </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="mb-1 block text-xs font-medium text-gray-500">Sold price</label>
@@ -216,6 +236,9 @@ export default function SalesPage() {
   const [recentSales, setRecentSales] = useState<Sale[]>([]);
   const [receiptSale, setReceiptSale] = useState<Sale | null>(null);
   const [editingSale, setEditingSale] = useState<Sale | null>(null);
+  // Edit was opened from the receipt: cancelling goes back to it, and saving shows the
+  // updated receipt.
+  const [editingFromReceipt, setEditingFromReceipt] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const canEdit = has("edit_sales");
@@ -458,7 +481,10 @@ export default function SalesPage() {
                         {canEdit ? (
                           <button
                             type="button"
-                            onClick={() => setEditingSale(sale)}
+                            onClick={() => {
+                              setEditingFromReceipt(false);
+                              setEditingSale(sale);
+                            }}
                             className="flex items-center gap-1 text-xs font-medium text-gray-500 hover:underline dark:text-gray-400"
                           >
                             <Pencil size={14} />
@@ -492,9 +518,34 @@ export default function SalesPage() {
         </table>
       </div>
 
-      {receiptSale ? <SaleReceipt sale={receiptSale} onClose={() => setReceiptSale(null)} /> : null}
+      {receiptSale ? (
+        <SaleReceipt
+          sale={receiptSale}
+          onClose={() => setReceiptSale(null)}
+          onEdit={
+            canEdit
+              ? () => {
+                  setEditingFromReceipt(true);
+                  setEditingSale(receiptSale);
+                  setReceiptSale(null);
+                }
+              : undefined
+          }
+        />
+      ) : null}
       {editingSale ? (
-        <EditSaleModal sale={editingSale} onClose={() => setEditingSale(null)} onSaved={loadRecentSales} />
+        <EditSaleModal
+          sale={editingSale}
+          onClose={() => {
+            setEditingSale(null);
+            if (editingFromReceipt) setReceiptSale(editingSale);
+          }}
+          onSaved={(updated) => {
+            loadRecentSales();
+            setEditingSale(null);
+            if (editingFromReceipt) setReceiptSale(updated);
+          }}
+        />
       ) : null}
     </div>
   );

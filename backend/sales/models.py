@@ -39,3 +39,6 @@ class SaleItem(models.Model):
     class Meta:
         db_table = "sale_items"
         indexes = [models.Index(fields=["imei"])]
+        # A sale's phones always list in the same order (receipt, edit form), rather than in
+        # whatever order the database happens to return rows after an update.
+        ordering = ["stock_item__category__name", "stock_item__model__name", "imei", "id"]

@@ -207,3 +207,124 @@ class SaleTests(APITestCase):
         self.stock_item.refresh_from_db()
         self.assertEqual(self.stock_item.quantity_remaining, 2)
         self.assertFalse(SaleItem.objects.filter(imei="111111111111111").exists())
+
+
+class SaleEditTests(APITestCase):
+    def setUp(self):
+        create_perm = Permission.objects.create(codename="create_sales", label="Create Sales", category="sales")
+        edit_perm = Permission.objects.create(codename="edit_sales", label="Edit Sales", category="sales")
+        seller_role = Role.objects.create(name="Seller")
+        seller_role.permissions.add(create_perm)
+        editor_role = Role.objects.create(name="Editor")
+        editor_role.permissions.add(create_perm, edit_perm)
+        self.seller = User.objects.create_user(
+            username="seller", password="Str0ngPassw0rd!", phone="255700000040", role=seller_role, must_change_password=False
+        )
+        self.editor = User.objects.create_user(
+            username="editor", password="Str0ngPassw0rd!", phone="255700000042", role=editor_role, must_change_password=False
+        )
+        supplier = Supplier.objects.create(name="Blue Telecom")
+        category = Category.objects.create(name="Samsung")
+        model = PhoneModel.objects.create(category=category, name="Galaxy A56")
+        other_model = PhoneModel.objects.create(category=category, name="Galaxy S23")
+        stock_in = StockIn.objects.create(supplier=supplier, import_date=date.today(), created_by=self.seller)
+
+        def stock(m):
+            return StockItem.objects.create(
+                stock_in=stock_in, category=category, model=m, quantity=5, quantity_remaining=4,
+                buying_price="500000", min_selling_price="600000", max_selling_price="700000",
+            )
+
+        self.stock_item = stock(model)
+        self.other_stock = stock(other_model)
+        sale = Sale.objects.create(
+            invoice_number="INV-EDIT-1", customer_name="Juma", payment_method="cash", sold_by=self.seller
+        )
+        self.first = SaleItem.objects.create(sale=sale, stock_item=self.stock_item, imei="111111111111111", selling_price="650000")
+        self.second = SaleItem.objects.create(sale=sale, stock_item=self.other_stock, imei="222222222222222", selling_price="700000")
+        self.sale = sale
+        self.client.force_authenticate(self.editor)
+
+    def _patch(self, first=None, second=None, **header):
+        def line(item, overrides):
+            base = {
+                "id": str(item.id), "stockItem": str(item.stock_item_id), "imei": item.imei,
+                "sellingPrice": str(item.selling_price), "discount": str(item.discount),
+            }
+            return {**base, **(overrides or {})}
+
+        payload = {"items": [line(self.first, first), line(self.second, second)], **header}
+        return self.client.patch(f"/api/v1/sales/sales/{self.sale.id}/", payload, format="json")
+
+    def test_price_discount_and_customer_can_be_edited(self):
+        res = self._patch(first={"sellingPrice": "640000", "discount": "10000"}, customerName="Juma Ali", notes="paid later")
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.first.refresh_from_db()
+        self.sale.refresh_from_db()
+        self.assertEqual((str(self.first.selling_price), str(self.first.discount)), ("640000.00", "10000.00"))
+        self.assertEqual((self.sale.customer_name, self.sale.notes), ("Juma Ali", "paid later"))
+
+    def test_the_response_is_the_updated_sale_ready_to_show_as_a_receipt(self):
+        body = self._patch(first={"sellingPrice": "640000"}).json()
+        self.assertEqual(body["invoiceNumber"], "INV-EDIT-1")
+        self.assertEqual(len(body["items"]), 2)
+        self.assertEqual({item["sellingPrice"] for item in body["items"]}, {640000, 700000})
+
+    def test_a_wrong_imei_can_be_corrected(self):
+        res = self._patch(first={"imei": "333333333333333"})
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.first.refresh_from_db()
+        self.assertEqual(self.first.imei, "333333333333333")
+        self.assertIn("333333333333333", [item["imei"] for item in res.json()["items"]])
+
+    def test_an_imei_can_be_cleared(self):
+        self._patch(first={"imei": ""})
+        self.first.refresh_from_db()
+        self.assertIsNone(self.first.imei)
+
+    def test_an_imei_belonging_to_another_sale_is_refused_and_nothing_changes(self):
+        elsewhere = Sale.objects.create(invoice_number="INV-OTHER", customer_name="X", payment_method="cash", sold_by=self.seller)
+        SaleItem.objects.create(sale=elsewhere, stock_item=self.stock_item, imei="999999999999999", selling_price="650000")
+
+        res = self._patch(first={"imei": "999999999999999", "sellingPrice": "1"}, customerName="Changed")
+
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("already recorded", res.json()["detail"])
+        self.first.refresh_from_db()
+        self.sale.refresh_from_db()
+        self.assertEqual((self.first.imei, str(self.first.selling_price), self.sale.customer_name), ("111111111111111", "650000.00", "Juma"))
+
+    def test_the_same_imei_on_two_lines_of_this_sale_is_refused(self):
+        res = self._patch(first={"imei": "444444444444444"}, second={"imei": "444444444444444"})
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_swapping_two_imeis_within_a_sale_is_not_possible_but_keeping_them_is_fine(self):
+        # Sending each line's own IMEI back unchanged must not look like a duplicate.
+        self.assertEqual(self._patch(first={"sellingPrice": "651000"}).status_code, status.HTTP_200_OK)
+
+    def test_an_imei_that_is_on_a_loan_sale_is_refused(self):
+        from loans.models import LoanSale, LoanSaleItem
+
+        loan = LoanSale.objects.create(invoice_number="LOAN-EDIT", business_name="Kariakoo", sold_by=self.seller)
+        LoanSaleItem.objects.create(loan_sale=loan, stock_item=self.stock_item, imei="555555555555555", selling_price="650000")
+        res = self._patch(first={"imei": "555555555555555"})
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_the_phone_itself_cannot_be_swapped_and_stock_is_untouched(self):
+        res = self._patch(first={"stockItem": str(self.other_stock.id)})
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.first.refresh_from_db()
+        self.stock_item.refresh_from_db()
+        self.other_stock.refresh_from_db()
+        self.assertEqual(self.first.stock_item_id, self.stock_item.id)
+        self.assertEqual((self.stock_item.quantity_remaining, self.other_stock.quantity_remaining), (4, 4))
+
+    def test_someone_without_edit_sales_cannot_edit(self):
+        self.client.force_authenticate(self.seller)
+        self.assertEqual(self._patch(customerName="Nope").status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_a_sales_phones_always_come_back_in_the_same_order(self):
+        # Brand then model: the A56 before the S23, however the rows were written.
+        for _ in range(3):
+            body = self._patch(second={"sellingPrice": "710000"}).json()
+            self.assertEqual([item["modelName"] for item in body["items"]], ["Galaxy A56", "Galaxy S23"])
