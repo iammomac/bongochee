@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { AuthContext } from "../hooks/useAuth";
 import { useIdleLogout } from "../hooks/useIdleLogout";
+import { IdleWarningModal } from "../components/IdleWarningModal";
 import { api } from "../services/api";
 import type { User } from "../types";
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [showIdleWarning, setShowIdleWarning] = useState(false);
 
   useEffect(() => {
     api.get<User>("/auth/me/")
@@ -26,9 +28,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const handleIdle = useCallback(() => {
+    setShowIdleWarning(false);
     void logout();
   }, []);
-  useIdleLogout(Boolean(user), handleIdle);
+  const handleWarn = useCallback(() => setShowIdleWarning(true), []);
+  const handleActive = useCallback(() => setShowIdleWarning(false), []);
+  useIdleLogout(Boolean(user), { onWarn: handleWarn, onIdle: handleIdle, onActive: handleActive });
 
   const changePassword = async (newPassword: string) => {
     const res = await api.post<User>("/auth/change-password/", { newPassword });
@@ -38,6 +43,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   return (
     <AuthContext.Provider value={{ user, isLoading, login, logout, changePassword }}>
       {children}
+      {showIdleWarning ? <IdleWarningModal onStay={handleActive} /> : null}
     </AuthContext.Provider>
   );
 }

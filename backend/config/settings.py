@@ -214,8 +214,9 @@ SECURE_SSL_REDIRECT = not DEBUG
 SESSION_COOKIE_SECURE = not DEBUG
 CSRF_COOKIE_SECURE = not DEBUG
 
-# Auto-logout: how long an access token / idle session is valid (frontend also enforces this)
-SESSION_COOKIE_AGE = 60 * 30  # 30 min idle timeout
+# Auto-logout: how long an access token / idle session is valid (frontend also enforces this,
+# see frontend/src/hooks/useIdleLogout.ts -- kept in sync with this value by convention, not code)
+SESSION_COOKIE_AGE = 60 * 60  # 60 min idle timeout
 
 if not DEBUG:
     # HSTS: tell browsers to only ever hit this host over HTTPS.
