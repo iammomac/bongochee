@@ -7,7 +7,7 @@ export function DashboardLayout() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   return (
-    <div className="flex h-screen bg-background dark:bg-gray-950">
+    <div className="flex h-screen overflow-hidden bg-background dark:bg-gray-950">
       <Sidebar mobileOpen={mobileNavOpen} onCloseMobile={() => setMobileNavOpen(false)} />
       {/* min-w-0: a flex item never shrinks below its content's width by default, so
           without it one wide table stretches this column -- and the whole page -- past the
