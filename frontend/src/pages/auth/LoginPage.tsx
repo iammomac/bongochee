@@ -5,6 +5,7 @@ import { z } from "zod";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../hooks/useAuth";
 import { extractErrorMessage } from "../../lib/errors";
+import { InstallApp } from "../../components/InstallApp";
 import logoBadge from "../../assets/logo-badge.png";
 
 const schema = z.object({
@@ -81,6 +82,12 @@ export default function LoginPage() {
 
   return (
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-gradient-to-br from-primary/10 via-background to-secondary/10 dark:from-primary/10 dark:via-gray-950 dark:to-secondary/5">
+      {/* This page has no top bar (it's a full-bleed flip card) -- the install
+          button gets its own corner instead of sitting "next to" a theme toggle. */}
+      <div className="absolute right-4 top-4 z-10">
+        <InstallApp />
+      </div>
+
       {/* Soft sparkle — a few blurred brand-color glows, kept subtle. */}
       <div className="pointer-events-none absolute -left-20 -top-20 h-72 w-72 rounded-full bg-primary/25 blur-3xl" />
       <div className="pointer-events-none absolute -bottom-24 -right-16 h-80 w-80 rounded-full bg-secondary/25 blur-3xl" />

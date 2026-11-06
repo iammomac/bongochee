@@ -5,6 +5,7 @@ import { useAuth } from "../hooks/useAuth";
 import { useTheme } from "../hooks/useTheme";
 import { requestPasswordChange } from "../services/passwordRequests";
 import { listNotifications, markAllNotificationsRead, markNotificationRead } from "../services/notifications";
+import { InstallApp } from "./InstallApp";
 import type { Notification } from "../types";
 
 const POLL_INTERVAL_MS = 60_000;
@@ -248,6 +249,7 @@ export function Topbar({ onMenuClick }: TopbarProps) {
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-2 sm:gap-4">
+        <InstallApp />
         <NotificationBell />
         <PasswordRequestButton />
         <button
