@@ -108,7 +108,7 @@ export function Sidebar({ mobileOpen, onCloseMobile }: SidebarProps) {
     <>
       {/* Desktop rail — collapsible, hidden below md; the only nav surface on wide screens. */}
       <aside
-        className={`relative hidden flex-col border-r border-gray-100 bg-white p-4 transition-[width] duration-300 ease-in-out dark:border-gray-800 dark:bg-gray-900 md:flex ${
+        className={`relative hidden flex-col overflow-y-auto border-r border-gray-100 bg-white p-4 transition-[width] duration-300 ease-in-out dark:border-gray-800 dark:bg-gray-900 md:flex ${
           collapsed ? "w-20" : "w-64"
         }`}
       >
