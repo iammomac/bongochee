@@ -1,6 +1,7 @@
 from datetime import date
 
 from django.core.cache import cache
+from django.core.management import call_command
 from django.test import override_settings
 from rest_framework import status
 from rest_framework.test import APITestCase
@@ -197,6 +198,31 @@ class EventNotificationTests(APITestCase):
         self.assertEqual(Notification.objects.filter(notification_type="new_return", recipient=self.support).count(), 0)
         notification = Notification.objects.get(notification_type="new_return", recipient=self.admin)
         self.assertIn("444444444444444", notification.message)
+
+
+class SendBackupReminderCommandTests(APITestCase):
+    def setUp(self):
+        self.superuser = User.objects.create_user(
+            username="root", password="Str0ngPassw0rd!", phone="255700000080", must_change_password=False, is_superuser=True
+        )
+        system_role = Role.objects.create(name="Admin", is_system_role=True)
+        self.system_admin = User.objects.create_user(
+            username="sysadmin", password="Str0ngPassw0rd!", phone="255700000081", role=system_role, must_change_password=False
+        )
+        self.regular_user = User.objects.create_user(
+            username="seller", password="Str0ngPassw0rd!", phone="255700000082", must_change_password=False
+        )
+
+    def test_only_reaches_true_superusers_not_system_role_admins(self):
+        call_command("send_backup_reminder")
+        recipients = set(Notification.objects.values_list("recipient__username", flat=True))
+        self.assertEqual(recipients, {"root"})
+
+    def test_notification_links_to_backup_page(self):
+        call_command("send_backup_reminder")
+        notification = Notification.objects.get(recipient=self.superuser)
+        self.assertEqual(notification.link, "/backup")
+        self.assertEqual(notification.notification_type, "system_alert")
 
 
 class NotificationViewSetTests(APITestCase):

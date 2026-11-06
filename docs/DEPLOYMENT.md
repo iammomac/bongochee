@@ -156,6 +156,37 @@ gunzip -c /var/backups/bongochee-2026-09-01.sql.gz | \
 docker compose -f docker-compose.yml -f docker-compose.prod.yml start backend
 ```
 
+**Docker build-cache cleanup** (monthly cron): every `docker compose ... up -d --build`
+leaves old, now-unreferenced build layers behind in Docker's build cache — nothing
+ever removes them on its own, so they just accumulate with every deploy indefinitely.
+```bash
+# /etc/cron.monthly/bongochee-docker-cleanup
+#!/bin/sh
+# until=720h (30 days): only removes cache that's sat unused for a month, so a
+# deploy earlier the same day doesn't get its just-built layers prematurely evicted.
+docker builder prune -af --filter "until=720h" >> /var/log/bongochee-docker-cleanup.log 2>&1
+```
+Make it executable: `chmod +x /etc/cron.monthly/bongochee-docker-cleanup`. This only
+targets the build cache (confirmed via `docker system df` to be the actual source of
+leftover disk usage, not old images/containers) — it never touches images or
+containers currently in use, so it can't disrupt the running app.
+
+**Weekly backup reminder** (cron): nudges the super admin specifically (true
+`is_superuser=True` accounts only — not the system-role "admin" account) to take a
+manual backup from the in-app Backup & Restore page, via the same in-app
+notification bell everything else uses.
+```bash
+# /etc/cron.weekly/bongochee-backup-reminder
+#!/bin/sh
+cd /path/to/bongochee
+docker compose -f docker-compose.yml -f docker-compose.prod.yml exec -T backend \
+  python manage.py send_backup_reminder >> /var/log/bongochee-backup-reminder.log 2>&1
+```
+Make it executable: `chmod +x /etc/cron.weekly/bongochee-backup-reminder`. This is a
+nudge toward the manual, in-app backup (see "Restoring from a backup" above for how
+that one works) — separate from the automated daily `pg_dump` cron job below, which
+keeps running either way.
+
 **Rotating secrets**: change `DJANGO_SECRET_KEY` or `POSTGRES_PASSWORD` in
 `backend/.env`, then `docker compose ... up -d` to recreate the backend with the new
 values. Changing `DJANGO_SECRET_KEY` invalidates all existing JWT sessions — every
