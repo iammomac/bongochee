@@ -108,7 +108,7 @@ export function Sidebar({ mobileOpen, onCloseMobile }: SidebarProps) {
     <>
       {/* Desktop rail — collapsible, hidden below md; the only nav surface on wide screens. */}
       <aside
-        className={`relative hidden flex-col overflow-y-auto border-r border-gray-100 bg-white p-4 transition-[width] duration-300 ease-in-out dark:border-gray-800 dark:bg-gray-900 md:flex ${
+        className={`relative hidden flex-col border-r border-gray-100 bg-white p-4 transition-[width] duration-300 ease-in-out dark:border-gray-800 dark:bg-gray-900 md:flex ${
           collapsed ? "w-20" : "w-64"
         }`}
       >
@@ -127,7 +127,12 @@ export function Sidebar({ mobileOpen, onCloseMobile }: SidebarProps) {
           className={collapsed ? "mb-8 h-10 w-10 self-center object-contain" : "mb-8 h-16 w-auto self-start px-2"}
         />
 
-        <NavLinks collapsed={collapsed} />
+        {/* overflow-y-auto scoped to just the nav list (not the whole aside) -- the
+            collapse button above sits outside this box, positioned via -right-3 just
+            past the aside's own edge, and an overflow-auto ancestor would clip it. */}
+        <div className="flex-1 overflow-y-auto">
+          <NavLinks collapsed={collapsed} />
+        </div>
       </aside>
 
       {/* Mobile drawer — below md the rail above is hidden entirely, so this is the
