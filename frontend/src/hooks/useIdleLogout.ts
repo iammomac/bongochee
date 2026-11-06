@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 
-const IDLE_TIMEOUT_MS = 60 * 60 * 1000; // matches SESSION_COOKIE_AGE in backend/config/settings.py
+const IDLE_TIMEOUT_MS = 30 * 60 * 1000; // matches SESSION_COOKIE_AGE in backend/config/settings.py
 const WARNING_BEFORE_MS = 5 * 60 * 1000; // show a "still there?" prompt this long before logging out
 const ACTIVITY_EVENTS = ["mousemove", "keydown", "click", "scroll", "touchstart"] as const;
 
