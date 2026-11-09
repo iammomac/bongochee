@@ -89,6 +89,41 @@ describe("LoanSalesPage", () => {
     });
   });
 
+  it("pages through every loan, 25 at a time", async () => {
+    const loans = Array.from({ length: 30 }, (_, i) =>
+      makeLoan({ id: `loan-${i + 1}`, invoiceNumber: `INV-${i + 1}`, businessName: `Shop ${i + 1}` }),
+    );
+    vi.mocked(loansService.listLoanSales).mockResolvedValue(loans);
+    render(<LoanSalesPage />);
+
+    expect(await screen.findByText("Page 1 of 2 — 30 entries")).toBeInTheDocument();
+    expect(screen.getByText("Shop 25")).toBeInTheDocument();
+    expect(screen.queryByText("Shop 26")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: /next/i }));
+    expect(screen.getByText("Page 2 of 2 — 30 entries")).toBeInTheDocument();
+    expect(screen.getByText("Shop 30")).toBeInTheDocument();
+    expect(screen.queryByText("Shop 1")).not.toBeInTheDocument();
+  });
+
+  it("filters the table by business name", async () => {
+    vi.mocked(loansService.listLoanSales).mockResolvedValue([
+      makeLoan({ id: "a", invoiceNumber: "INV-A", businessName: "Kariakoo Phones Ltd" }),
+      makeLoan({ id: "b", invoiceNumber: "INV-B", businessName: "Mwenge Mobile" }),
+    ]);
+    render(<LoanSalesPage />);
+    await screen.findByText("Mwenge Mobile");
+
+    const search = screen.getByRole("searchbox", { name: /search loan sales/i });
+    await userEvent.type(search, "mwenge");
+    expect(screen.getByText("Mwenge Mobile")).toBeInTheDocument();
+    expect(screen.queryByText("Kariakoo Phones Ltd")).not.toBeInTheDocument();
+
+    await userEvent.clear(search);
+    await userEvent.type(search, "nobody");
+    expect(screen.getByText('No loan sales match "nobody"')).toBeInTheDocument();
+  });
+
   it("hides the create form without create_loan_sales permission, but still lists loans", async () => {
     vi.mocked(usePermissions).mockReturnValue({ has: (code) => code === "record_loan_payments", isAdminOrSuper: false });
     vi.mocked(loansService.listLoanSales).mockResolvedValue([makeLoan()]);
