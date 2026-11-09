@@ -79,6 +79,18 @@ class LoanSaleTests(APITestCase):
         self.assertIsInstance(res.json(), list)
         self.assertEqual(len(res.json()), 30)
 
+    def test_paged_lists_honour_page_size_up_to_the_cap(self):
+        # Suppliers is an ordinary paged list (25 by default); the client may ask for bigger pages.
+        Supplier.objects.bulk_create([Supplier(name=f"S{i}") for i in range(30)])
+        self.client.force_authenticate(User.objects.create_superuser("root", password="Str0ngPassw0rd!", phone="255700000099"))
+        default = self.client.get("/api/v1/suppliers/suppliers/").json()
+        self.assertEqual(len(default["results"]), 25)
+        big = self.client.get("/api/v1/suppliers/suppliers/?page_size=500").json()
+        self.assertEqual(len(big["results"]), big["count"])
+        self.assertIsNone(big["next"])
+        capped = self.client.get("/api/v1/suppliers/suppliers/?page_size=100000").json()
+        self.assertLessEqual(len(capped["results"]), 500)
+
     def _loan_payload(self, items, **overrides):
         payload = {
             "invoiceNumber": "LOAN-1",

@@ -1,5 +1,5 @@
 import { api } from "./api";
-import { unwrapList, type Paginated } from "../lib/pagination";
+import { fetchAll, unwrapList, type Paginated } from "../lib/pagination";
 import type { ReturnCategory, ReturnRecord, ReturnStatus, SaleItemLookupResult } from "../types";
 
 export async function lookupSaleItem(query: string) {
@@ -43,8 +43,7 @@ export async function uploadReturnPhoto(returnId: string, file: File) {
 }
 
 export async function listRecentReturns() {
-  const { data } = await api.get<Paginated<ReturnRecord> | ReturnRecord[]>("/returns/returns/");
-  return unwrapList(data);
+  return fetchAll<ReturnRecord>("/returns/returns/");
 }
 
 export async function updateReturnStatus(id: string, status: ReturnStatus) {

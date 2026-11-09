@@ -9,6 +9,7 @@ import {
 } from "../../services/suppliers";
 import { extractErrorMessage } from "../../lib/errors";
 import type { Supplier } from "../../types";
+import { TablePager, TableSearch, anyFieldIncludes, usePagedSearch } from "../../components/TablePaging";
 
 const blankInput: SupplierInput = { name: "", phone: "", address: "", email: "", notes: "" };
 
@@ -68,6 +69,7 @@ function SupplierFields({
 
 export default function SuppliersPage() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const paging = usePagedSearch(suppliers, (s, q) => anyFieldIncludes(q, s.name, s.phone, s.email));
   const [error, setError] = useState<string | null>(null);
 
   const [creating, setCreating] = useState(false);
@@ -170,6 +172,13 @@ export default function SuppliersPage() {
         </div>
       ) : null}
 
+      <TableSearch
+        value={paging.search}
+        onChange={paging.setSearch}
+        placeholder="Search by name, phone or email"
+        label="Search suppliers"
+      />
+
       <div className="card table-card">
         <table className="min-w-full text-sm">
           <thead className="bg-gray-50 text-left text-gray-500 dark:bg-gray-950">
@@ -181,7 +190,7 @@ export default function SuppliersPage() {
             </tr>
           </thead>
           <tbody>
-            {suppliers.map((supplier) =>
+            {paging.pageItems.map((supplier) =>
               editingId === supplier.id ? (
                 <tr key={supplier.id} className="border-t border-gray-100 dark:border-gray-800">
                   <td colSpan={4} className="px-4 py-4">
@@ -229,15 +238,21 @@ export default function SuppliersPage() {
                 </tr>
               ),
             )}
-            {suppliers.length === 0 ? (
+            {paging.pageItems.length === 0 ? (
               <tr>
                 <td colSpan={4} className="px-4 py-8 text-center text-sm text-gray-400">
-                  No suppliers yet
+                  {suppliers.length === 0 ? "No suppliers yet" : `No suppliers match "${paging.search.trim()}"`}
                 </td>
               </tr>
             ) : null}
           </tbody>
         </table>
+        <TablePager
+          page={paging.page}
+          totalPages={paging.totalPages}
+          count={paging.filteredCount}
+          onPageChange={paging.setPage}
+        />
       </div>
     </div>
   );

@@ -6,6 +6,7 @@ import { Pencil, PlusCircle, Receipt as ReceiptIcon, Trash2, X } from "lucide-re
 import { PhoneEntryPanel, netPrice, type CartLine } from "../../components/PhoneEntryPanel";
 import { SaleReceipt } from "../../components/SaleReceipt";
 import { Select } from "../../components/Select";
+import { TablePager, TableSearch, anyFieldIncludes, usePagedSearch } from "../../components/TablePaging";
 import { createSale, listRecentSales, updateSale, deleteSale } from "../../services/sales";
 import { extractErrorMessage } from "../../lib/errors";
 import { openWhatsAppReceipt } from "../../lib/whatsapp";
@@ -234,6 +235,15 @@ export default function SalesPage() {
   const [cart, setCart] = useState<CartLine[]>([]);
   const [serverError, setServerError] = useState<string | null>(null);
   const [recentSales, setRecentSales] = useState<Sale[]>([]);
+  const paging = usePagedSearch(recentSales, (sale, q) =>
+    anyFieldIncludes(
+      q,
+      sale.invoiceNumber,
+      sale.customerName,
+      sale.customerPhone,
+      ...sale.items.flatMap((item) => [item.imei, `${item.categoryName} ${item.modelName}`]),
+    ),
+  );
   const [receiptSale, setReceiptSale] = useState<Sale | null>(null);
   const [editingSale, setEditingSale] = useState<Sale | null>(null);
   // Edit was opened from the receipt: cancelling goes back to it, and saving shows the
@@ -426,6 +436,13 @@ export default function SalesPage() {
         </div>
       </form>
 
+      <TableSearch
+        value={paging.search}
+        onChange={paging.setSearch}
+        placeholder="Search by invoice, customer, phone or IMEI"
+        label="Search sales"
+      />
+
       <div className="card table-card">
         <table className="min-w-full text-sm">
           <thead className="bg-gray-50 text-left text-gray-500 dark:bg-gray-950">
@@ -439,7 +456,7 @@ export default function SalesPage() {
             </tr>
           </thead>
           <tbody>
-            {recentSales.map((sale) => {
+            {paging.pageItems.map((sale) => {
               const saleTotal = sale.items.reduce((sum, item) => sum + (item.sellingPrice - item.discount), 0);
               return (
                 <tr key={sale.id} className="border-t border-gray-100 dark:border-gray-800">
@@ -507,15 +524,21 @@ export default function SalesPage() {
                 </tr>
               );
             })}
-            {recentSales.length === 0 ? (
+            {paging.pageItems.length === 0 ? (
               <tr>
                 <td colSpan={6} className="px-4 py-8 text-center text-sm text-gray-400">
-                  No sales recorded yet
+                  {recentSales.length === 0 ? "No sales recorded yet" : `No sales match "${paging.search.trim()}"`}
                 </td>
               </tr>
             ) : null}
           </tbody>
         </table>
+        <TablePager
+          page={paging.page}
+          totalPages={paging.totalPages}
+          count={paging.filteredCount}
+          onPageChange={paging.setPage}
+        />
       </div>
 
       {receiptSale ? (

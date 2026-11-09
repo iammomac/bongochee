@@ -1,5 +1,5 @@
 import { api } from "./api";
-import { unwrapList, type Paginated } from "../lib/pagination";
+import { fetchAll, unwrapList, type Paginated } from "../lib/pagination";
 import type { Category, PhoneModel } from "../types";
 
 export async function searchCategories(query: string) {
@@ -26,8 +26,7 @@ export async function searchModels(categoryId: string, query: string) {
 }
 
 export async function listAllModels() {
-  const { data } = await api.get<Paginated<PhoneModel> | PhoneModel[]>("/catalog/models/");
-  return unwrapList(data);
+  return fetchAll<PhoneModel>("/catalog/models/");
 }
 
 export async function getOrCreateModel(categoryId: string, name: string) {

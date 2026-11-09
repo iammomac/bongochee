@@ -1,5 +1,5 @@
 import { api } from "./api";
-import { unwrapList, type Paginated } from "../lib/pagination";
+import { fetchAll, unwrapList, type Paginated } from "../lib/pagination";
 import type { AvailablePhone, PaymentMethod, Sale, StockItem } from "../types";
 
 export interface SaleItemPayload {
@@ -36,8 +36,7 @@ export async function createSale(payload: SaleCreatePayload) {
 }
 
 export async function listRecentSales() {
-  const { data } = await api.get<Paginated<Sale> | Sale[]>("/sales/sales/");
-  return unwrapList(data);
+  return fetchAll<Sale>("/sales/sales/");
 }
 
 export interface SaleItemUpdatePayload {

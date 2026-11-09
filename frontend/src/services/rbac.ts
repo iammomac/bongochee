@@ -1,5 +1,5 @@
 import { api } from "./api";
-import { unwrapList, type Paginated } from "../lib/pagination";
+import { fetchAll } from "../lib/pagination";
 import type { Permission } from "../types";
 
 // RoleViewSet's own serializer represents `permissions` as Permission PKs (numbers),
@@ -16,13 +16,11 @@ export interface RoleWithPermissionIds {
 }
 
 export async function listRoles() {
-  const { data } = await api.get<Paginated<RoleWithPermissionIds> | RoleWithPermissionIds[]>("/rbac/roles/");
-  return unwrapList(data);
+  return fetchAll<RoleWithPermissionIds>("/rbac/roles/");
 }
 
 export async function listPermissions() {
-  const { data } = await api.get<Paginated<Permission> | Permission[]>("/rbac/permissions/");
-  return unwrapList(data);
+  return fetchAll<Permission>("/rbac/permissions/");
 }
 
 export interface RoleInput {

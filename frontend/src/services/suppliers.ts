@@ -1,10 +1,9 @@
 import { api } from "./api";
-import { unwrapList, type Paginated } from "../lib/pagination";
+import { fetchAll, unwrapList, type Paginated } from "../lib/pagination";
 import type { Supplier } from "../types";
 
 export async function listSuppliers() {
-  const { data } = await api.get<Paginated<Supplier> | Supplier[]>("/suppliers/suppliers/");
-  return unwrapList(data);
+  return fetchAll<Supplier>("/suppliers/suppliers/");
 }
 
 export async function searchSuppliers(query: string) {

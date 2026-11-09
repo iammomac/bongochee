@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Banknote, ChevronLeft, ChevronRight, HandCoins, Pencil, PlusCircle, Search, Trash2, X } from "lucide-react";
+import { Banknote, HandCoins, Pencil, PlusCircle, Trash2, X } from "lucide-react";
 import { LoanCharts } from "../../components/LoanCharts";
+import { TablePager, TableSearch, anyFieldIncludes, usePagedSearch } from "../../components/TablePaging";
 import { PhoneEntryPanel, netPrice, type CartLine } from "../../components/PhoneEntryPanel";
 import { Select } from "../../components/Select";
 import {
@@ -38,8 +39,6 @@ function generateInvoiceNumber() {
 function defaultHeaderValues(): HeaderValues {
   return { businessName: "", contactPerson: "", contactPhone: "", notes: "", invoiceNumber: generateInvoiceNumber() };
 }
-
-const PAGE_SIZE = 25;
 
 function statusBadge(status: LoanStatus) {
   if (status === "paid") return { label: "Paid off", className: "bg-success/10 text-success" };
@@ -499,15 +498,7 @@ export default function LoanSalesPage() {
   // Bumped whenever a loan or payment changes, so the chart above never lags the table below.
   const [chartRefresh, setChartRefresh] = useState(0);
   const refreshChart = () => setChartRefresh((n) => n + 1);
-  const [search, setSearch] = useState("");
-  const [page, setPage] = useState(1);
-
-  const query = search.trim().toLowerCase();
-  const filteredLoans = query ? loans.filter((loan) => loan.businessName.toLowerCase().includes(query)) : loans;
-  const totalPages = Math.max(1, Math.ceil(filteredLoans.length / PAGE_SIZE));
-  // Clamp rather than reset, so deleting the last row on the final page doesn't strand you on an empty page.
-  const currentPage = Math.min(page, totalPages);
-  const pageLoans = filteredLoans.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  const paging = usePagedSearch(loans, (loan, q) => anyFieldIncludes(q, loan.businessName));
 
   const {
     register,
@@ -681,20 +672,12 @@ export default function LoanSalesPage() {
         </form>
       ) : null}
 
-      <div className="relative max-w-sm">
-        <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-        <input
-          type="search"
-          value={search}
-          onChange={(e) => {
-            setSearch(e.target.value);
-            setPage(1);
-          }}
-          placeholder="Search by business name"
-          aria-label="Search loan sales by business name"
-          className="w-full rounded-xl border border-gray-200 py-2 pl-9 pr-3 text-sm outline-none focus:border-primary dark:border-gray-800 dark:bg-gray-950"
-        />
-      </div>
+      <TableSearch
+        value={paging.search}
+        onChange={paging.setSearch}
+        placeholder="Search by business name"
+        label="Search loan sales by business name"
+      />
 
       <div className="card table-card">
         <table className="min-w-full text-sm">
@@ -710,7 +693,7 @@ export default function LoanSalesPage() {
             </tr>
           </thead>
           <tbody>
-            {pageLoans.map((loan) => {
+            {paging.pageItems.map((loan) => {
               const status = statusBadge(loan.loanStatus);
               return (
                 <tr key={loan.id} className="border-t border-gray-100 dark:border-gray-800">
@@ -736,41 +719,21 @@ export default function LoanSalesPage() {
                 </tr>
               );
             })}
-            {pageLoans.length === 0 ? (
+            {paging.pageItems.length === 0 ? (
               <tr>
                 <td colSpan={7} className="px-4 py-8 text-center text-sm text-gray-400">
-                  {loans.length === 0 ? "No loan sales recorded yet" : `No loan sales match "${search.trim()}"`}
+                  {loans.length === 0 ? "No loan sales recorded yet" : `No loan sales match "${paging.search.trim()}"`}
                 </td>
               </tr>
             ) : null}
           </tbody>
         </table>
-
-        <div className="flex items-center justify-between border-t border-gray-100 px-4 py-3 text-sm dark:border-gray-800">
-          <span className="text-xs text-gray-400">
-            {filteredLoans.length > 0 ? `Page ${currentPage} of ${totalPages} — ${filteredLoans.length} entries` : ""}
-          </span>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setPage(Math.max(1, currentPage - 1))}
-              disabled={currentPage <= 1}
-              className="flex items-center gap-1 rounded-xl border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 disabled:opacity-40 dark:border-gray-800 dark:text-gray-300"
-            >
-              <ChevronLeft size={14} />
-              Prev
-            </button>
-            <button
-              type="button"
-              onClick={() => setPage(Math.min(totalPages, currentPage + 1))}
-              disabled={currentPage >= totalPages}
-              className="flex items-center gap-1 rounded-xl border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 disabled:opacity-40 dark:border-gray-800 dark:text-gray-300"
-            >
-              Next
-              <ChevronRight size={14} />
-            </button>
-          </div>
-        </div>
+        <TablePager
+          page={paging.page}
+          totalPages={paging.totalPages}
+          count={paging.filteredCount}
+          onPageChange={paging.setPage}
+        />
       </div>
 
       {selectedLoan ? (

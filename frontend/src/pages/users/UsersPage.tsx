@@ -7,6 +7,7 @@ import { listRoles, type RoleWithPermissionIds } from "../../services/rbac";
 import { extractErrorMessage } from "../../lib/errors";
 import { useAuth } from "../../hooks/useAuth";
 import type { User } from "../../types";
+import { TablePager, TableSearch, anyFieldIncludes, usePagedSearch } from "../../components/TablePaging";
 
 const blankInput: UserInput = {
   username: "",
@@ -122,6 +123,9 @@ function UserFormFields({
 
 export default function UsersPage() {
   const [users, setUsers] = useState<User[]>([]);
+  const paging = usePagedSearch(users, (u, q) =>
+    anyFieldIncludes(q, u.fullName, u.username, u.phone, u.email, u.role?.name),
+  );
   const [roles, setRoles] = useState<RoleWithPermissionIds[]>([]);
   const [error, setError] = useState<string | null>(null);
 
@@ -268,6 +272,13 @@ export default function UsersPage() {
 
       <PasswordRequestsPanel />
 
+      <TableSearch
+        value={paging.search}
+        onChange={paging.setSearch}
+        placeholder="Search by name, username, phone or role"
+        label="Search users"
+      />
+
       <div className="card table-card">
         <table className="min-w-full text-sm">
           <thead className="bg-gray-50 text-left text-gray-500 dark:bg-gray-950">
@@ -279,7 +290,7 @@ export default function UsersPage() {
             </tr>
           </thead>
           <tbody>
-            {users.map((user) =>
+            {paging.pageItems.map((user) =>
               editingId === user.id ? (
                 <tr key={user.id} className="border-t border-gray-100 dark:border-gray-800">
                   <td colSpan={4} className="px-4 py-4">
@@ -362,15 +373,21 @@ export default function UsersPage() {
                 </tr>
               ),
             )}
-            {users.length === 0 ? (
+            {paging.pageItems.length === 0 ? (
               <tr>
                 <td colSpan={4} className="px-4 py-8 text-center text-sm text-gray-400">
-                  No users yet
+                  {users.length === 0 ? "No users yet" : `No users match "${paging.search.trim()}"`}
                 </td>
               </tr>
             ) : null}
           </tbody>
         </table>
+        <TablePager
+          page={paging.page}
+          totalPages={paging.totalPages}
+          count={paging.filteredCount}
+          onPageChange={paging.setPage}
+        />
       </div>
     </div>
   );

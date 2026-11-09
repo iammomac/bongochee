@@ -1,10 +1,9 @@
 import { api } from "./api";
-import { unwrapList, type Paginated } from "../lib/pagination";
+import { fetchAll } from "../lib/pagination";
 import type { User } from "../types";
 
 export async function listUsers() {
-  const { data } = await api.get<Paginated<User> | User[]>("/auth/users/");
-  return unwrapList(data);
+  return fetchAll<User>("/auth/users/");
 }
 
 export interface UserInput {

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Check, ChevronDown, Pencil, Plus, Search, Upload, X } from "lucide-react";
 import { ReturnCategoryPicker } from "../../components/ReturnCategoryPicker";
+import { TablePager, TableSearch, anyFieldIncludes, usePagedSearch } from "../../components/TablePaging";
 import { useDropdownPosition } from "../../hooks/useDropdownPosition";
 import {
   createReturn,
@@ -212,6 +213,16 @@ export default function ReturnsPage() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   const [recentReturns, setRecentReturns] = useState<ReturnRecord[]>([]);
+  const paging = usePagedSearch(recentReturns, (ret, q) =>
+    anyFieldIncludes(
+      q,
+      ret.invoiceNumber,
+      ret.customerName,
+      ret.imei,
+      `${ret.categoryName} ${ret.modelName}`,
+      ret.returnCategoryDisplay,
+    ),
+  );
   const [editingReturn, setEditingReturn] = useState<ReturnRecord | null>(null);
 
   const loadRecentReturns = () => {
@@ -480,6 +491,13 @@ export default function ReturnsPage() {
         </>
       ) : null}
 
+      <TableSearch
+        value={paging.search}
+        onChange={paging.setSearch}
+        placeholder="Filter by invoice, customer, phone, IMEI or category"
+        label="Filter recorded returns"
+      />
+
       <div className="card table-card">
         <table className="min-w-full text-sm">
           <thead className="bg-gray-50 text-left text-gray-500 dark:bg-gray-950">
@@ -495,7 +513,7 @@ export default function ReturnsPage() {
             </tr>
           </thead>
           <tbody>
-            {recentReturns.map((ret) => (
+            {paging.pageItems.map((ret) => (
               <tr key={ret.id} className="border-t border-gray-100 dark:border-gray-800">
                 <td className="px-4 py-3">{ret.invoiceNumber}</td>
                 <td className="px-4 py-3">{ret.customerName}</td>
@@ -533,15 +551,21 @@ export default function ReturnsPage() {
                 ) : null}
               </tr>
             ))}
-            {recentReturns.length === 0 ? (
+            {paging.pageItems.length === 0 ? (
               <tr>
                 <td colSpan={canEdit ? 8 : 7} className="px-4 py-8 text-center text-sm text-gray-400">
-                  No returns recorded yet
+                  {recentReturns.length === 0 ? "No returns recorded yet" : `No returns match "${paging.search.trim()}"`}
                 </td>
               </tr>
             ) : null}
           </tbody>
         </table>
+        <TablePager
+          page={paging.page}
+          totalPages={paging.totalPages}
+          count={paging.filteredCount}
+          onPageChange={paging.setPage}
+        />
       </div>
 
       {editingReturn ? (
