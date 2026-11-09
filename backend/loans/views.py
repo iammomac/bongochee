@@ -24,6 +24,9 @@ class LoanSaleViewSet(viewsets.ModelViewSet):
         .all()
     )
     serializer_class = LoanSaleSerializer
+    # The Loan Sales page loads the full list client-side (search, filters,
+    # totals), so returning only the first 25 silently hid older loans.
+    pagination_class = None
     permission_classes = [IsAuthenticated, HasPermission]
     required_permission = "create_loan_sales"
 

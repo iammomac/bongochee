@@ -70,6 +70,15 @@ class LoanSaleTests(APITestCase):
         )
         self.client.force_authenticate(self.dealer)
 
+    def test_list_returns_every_loan_not_just_the_first_page(self):
+        LoanSale.objects.bulk_create(
+            [LoanSale(invoice_number=f"BULK-{i}", business_name="Shop", sold_by=self.dealer) for i in range(30)]
+        )
+        res = self.client.get("/api/v1/loans/loan-sales/")
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertIsInstance(res.json(), list)
+        self.assertEqual(len(res.json()), 30)
+
     def _loan_payload(self, items, **overrides):
         payload = {
             "invoiceNumber": "LOAN-1",
