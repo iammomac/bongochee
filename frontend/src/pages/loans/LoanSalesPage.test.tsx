@@ -89,6 +89,44 @@ describe("LoanSalesPage", () => {
     });
   });
 
+  it("shows a customer receipt with payments and balance, and sends it to WhatsApp", async () => {
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    vi.mocked(loansService.listLoanSales).mockResolvedValue([
+      makeLoan({
+        contactPhone: "0711111111",
+        totalPaid: 200000,
+        balance: 450000,
+        loanStatus: "partial",
+        payments: [
+          {
+            id: "p1",
+            amount: 200000,
+            paymentMethod: "mobile_money",
+            paidDate: "2026-01-05",
+            notes: "",
+            recordedBy: "u1",
+            recordedByName: "Dealer",
+            createdAt: "2026-01-05T00:00:00Z",
+          },
+        ],
+      }),
+    ]);
+    render(<LoanSalesPage />);
+
+    await userEvent.click(await screen.findByRole("button", { name: /^receipt$/i }));
+    const receipt = within(screen.getByText("Loan statement").closest("div.receipt") as HTMLElement);
+    expect(receipt.getByText("Partially paid")).toBeInTheDocument();
+    expect(receipt.getByText("Balance due").nextSibling).toHaveTextContent("TZS 450,000");
+    expect(receipt.getByText("2026-01-05")).toBeInTheDocument();
+
+    await userEvent.click(receipt.getByRole("button", { name: /send via whatsapp/i }));
+    const url = decodeURIComponent(String(open.mock.calls[0][0]));
+    expect(url).toContain("https://wa.me/255711111111?text=");
+    expect(url).toContain("Paid so far: TZS 200,000");
+    expect(url).toContain("BALANCE DUE: TZS 450,000");
+    open.mockRestore();
+  });
+
   it("pages through every loan, 25 at a time", async () => {
     const loans = Array.from({ length: 30 }, (_, i) =>
       makeLoan({ id: `loan-${i + 1}`, invoiceNumber: `INV-${i + 1}`, businessName: `Shop ${i + 1}` }),

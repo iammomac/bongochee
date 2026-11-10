@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Banknote, HandCoins, Pencil, PlusCircle, Trash2, X } from "lucide-react";
+import { Banknote, HandCoins, Pencil, PlusCircle, Receipt as ReceiptIcon, Trash2, X } from "lucide-react";
 import { LoanCharts } from "../../components/LoanCharts";
+import { LoanReceipt } from "../../components/LoanReceipt";
 import { TablePager, TableSearch, anyFieldIncludes, usePagedSearch } from "../../components/TablePaging";
 import { PhoneEntryPanel, netPrice, type CartLine } from "../../components/PhoneEntryPanel";
 import { Select } from "../../components/Select";
@@ -55,9 +56,19 @@ interface LoanDetailModalProps {
   canDelete: boolean;
   canRecordPayment: boolean;
   onDeleted: () => void;
+  onShowReceipt: () => void;
 }
 
-function LoanDetailModal({ loan, onClose, onChanged, canEdit, canDelete, canRecordPayment, onDeleted }: LoanDetailModalProps) {
+function LoanDetailModal({
+  loan,
+  onClose,
+  onChanged,
+  canEdit,
+  canDelete,
+  canRecordPayment,
+  onDeleted,
+  onShowReceipt,
+}: LoanDetailModalProps) {
   const [editing, setEditing] = useState(false);
   const [businessName, setBusinessName] = useState(loan.businessName);
   const [contactPerson, setContactPerson] = useState(loan.contactPerson);
@@ -167,14 +178,24 @@ function LoanDetailModal({ loan, onClose, onChanged, canEdit, canDelete, canReco
               {status.label}
             </span>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-xl p-1.5 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
-            aria-label="Close"
-          >
-            <X size={16} />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onShowReceipt}
+              className="flex items-center gap-1.5 rounded-xl border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+            >
+              <ReceiptIcon size={14} />
+              Receipt
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-xl p-1.5 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
+              aria-label="Close"
+            >
+              <X size={16} />
+            </button>
+          </div>
         </div>
 
         {serverError ? <p className="mb-3 rounded-xl bg-danger/10 px-3 py-2 text-xs text-danger">{serverError}</p> : null}
@@ -494,6 +515,7 @@ export default function LoanSalesPage() {
   const [serverError, setServerError] = useState<string | null>(null);
   const [loans, setLoans] = useState<LoanSale[]>([]);
   const [selectedLoan, setSelectedLoan] = useState<LoanSale | null>(null);
+  const [receiptLoan, setReceiptLoan] = useState<LoanSale | null>(null);
   const [chartDays, setChartDays] = useState("14");
   // Bumped whenever a loan or payment changes, so the chart above never lags the table below.
   const [chartRefresh, setChartRefresh] = useState(0);
@@ -708,13 +730,23 @@ export default function LoanSalesPage() {
                     </span>
                   </td>
                   <td className="px-4 py-3">
-                    <button
-                      type="button"
-                      onClick={() => setSelectedLoan(loan)}
-                      className="text-xs font-medium text-primary hover:underline"
-                    >
-                      Details
-                    </button>
+                    <div className="flex items-center justify-end gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setReceiptLoan(loan)}
+                        className="flex items-center gap-1 text-xs font-medium text-gray-500 hover:text-primary hover:underline dark:text-gray-400"
+                      >
+                        <ReceiptIcon size={12} />
+                        Receipt
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedLoan(loan)}
+                        className="text-xs font-medium text-primary hover:underline"
+                      >
+                        Details
+                      </button>
+                    </div>
                   </td>
                 </tr>
               );
@@ -752,8 +784,11 @@ export default function LoanSalesPage() {
           canEdit={canEdit}
           canDelete={canDelete}
           canRecordPayment={canRecordPayment}
+          onShowReceipt={() => setReceiptLoan(selectedLoan)}
         />
       ) : null}
+
+      {receiptLoan ? <LoanReceipt loan={receiptLoan} onClose={() => setReceiptLoan(null)} /> : null}
     </div>
   );
 }
