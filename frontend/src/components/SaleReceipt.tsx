@@ -1,6 +1,7 @@
-import { MessageCircle, Pencil, Printer, X } from "lucide-react";
+import { useState } from "react";
+import { Check, Copy, MessageCircle, Pencil, Printer, X } from "lucide-react";
 import type { Sale } from "../types";
-import { openWhatsAppReceipt, saleTotal } from "../lib/whatsapp";
+import { buildReceiptMessage, openWhatsAppReceipt, saleTotal } from "../lib/whatsapp";
 import logo from "../assets/logo-trimmed.png";
 
 const currency = (value: number) => new Intl.NumberFormat("en-TZ", { maximumFractionDigits: 0 }).format(value);
@@ -18,7 +19,19 @@ export function SaleReceipt({ sale, onClose, onEdit }: Props) {
   // The real send already fires automatically right after the sale completes (see
   // SalesPage's onSubmit) — this button is the fallback for when that got silently
   // blocked as a popup, or the WhatsApp tab/window was closed by mistake.
+  // With no customer phone, this opens WhatsApp's contact picker instead.
   const sendViaWhatsApp = () => openWhatsAppReceipt(sale);
+
+  const [copied, setCopied] = useState(false);
+  const copyText = async () => {
+    try {
+      await navigator.clipboard.writeText(buildReceiptMessage(sale, total));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard can be blocked; WhatsApp and Print still work.
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
@@ -37,16 +50,22 @@ export function SaleReceipt({ sale, onClose, onEdit }: Props) {
               Edit sale
             </button>
           ) : null}
-          {sale.customerPhone ? (
-            <button
-              type="button"
-              onClick={sendViaWhatsApp}
-              className="flex items-center gap-2 rounded-xl bg-success px-3 py-1.5 text-sm font-medium text-white"
-            >
-              <MessageCircle size={14} />
-              Send via WhatsApp
-            </button>
-          ) : null}
+          <button
+            type="button"
+            onClick={sendViaWhatsApp}
+            className="flex items-center gap-2 rounded-xl bg-success px-3 py-1.5 text-sm font-medium text-white"
+          >
+            <MessageCircle size={14} />
+            Send via WhatsApp
+          </button>
+          <button
+            type="button"
+            onClick={() => void copyText()}
+            className="flex items-center gap-2 rounded-xl border border-gray-200 px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+          >
+            {copied ? <Check size={14} /> : <Copy size={14} />}
+            {copied ? "Copied" : "Copy text"}
+          </button>
           <button
             type="button"
             onClick={() => window.print()}

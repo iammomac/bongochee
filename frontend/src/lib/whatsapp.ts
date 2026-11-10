@@ -41,9 +41,11 @@ export function buildReceiptMessage(sale: Sale, total: number) {
 // as possible in the same click handler that triggered the sale (see SalesPage's
 // onSubmit) rather than later (e.g. on the receipt mounting) — the further removed
 // from the original click, the more likely it silently fails.
+//
+// Without a customer phone, wa.me opens WhatsApp's contact picker instead, so the
+// receipt can still be sent to whoever it's for.
 export function openWhatsAppReceipt(sale: Sale) {
-  if (!sale.customerPhone) return;
-  const number = toWhatsAppNumber(sale.customerPhone);
+  const number = sale.customerPhone ? toWhatsAppNumber(sale.customerPhone) : "";
   const text = encodeURIComponent(buildReceiptMessage(sale, saleTotal(sale)));
   window.open(`https://wa.me/${number}?text=${text}`, "_blank", "noopener,noreferrer");
 }
