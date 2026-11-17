@@ -1,7 +1,12 @@
+import threading
 from datetime import date
+from unittest import skipUnless
+
+from django.db import connection
+from django.test import TransactionTestCase
 
 from rest_framework import status
-from rest_framework.test import APITestCase
+from rest_framework.test import APIClient, APITestCase
 
 from accounts.models import User
 from catalog.models import Category, PhoneModel
@@ -132,6 +137,11 @@ class SaleTests(APITestCase):
             format="json",
         )
         self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        # The whole sale is rolled back -- not just the phone that didn't fit.
+        self.assertFalse(Sale.objects.filter(invoice_number="INV-SALE-1").exists())
+        self.assertFalse(SaleItem.objects.exists())
+        self.stock_item.refresh_from_db()
+        self.assertEqual(self.stock_item.quantity_remaining, 2)
 
     def test_duplicate_imei_is_rejected(self):
         SaleItem.objects.create(
@@ -328,3 +338,63 @@ class SaleEditTests(APITestCase):
         for _ in range(3):
             body = self._patch(second={"sellingPrice": "710000"}).json()
             self.assertEqual([item["modelName"] for item in body["items"]], ["Galaxy A56", "Galaxy S23"])
+
+
+@skipUnless(connection.features.has_select_for_update, "needs a database with row locking (PostgreSQL)")
+class ConcurrentLastUnitTests(TransactionTestCase):
+    """Two cashiers ring up the last phone at the same moment: exactly one sale may win."""
+
+    def setUp(self):
+        perm = Permission.objects.create(codename="create_sales", label="Create Sales", category="sales")
+        role = Role.objects.create(name="Seller")
+        role.permissions.add(perm)
+        self.cashiers = [
+            User.objects.create_user(
+                username=f"cashier{i}", password="Str0ngPassw0rd!", phone=f"25570000009{i}", role=role,
+                must_change_password=False,
+            )
+            for i in range(2)
+        ]
+        category = Category.objects.create(name="Samsung")
+        model = PhoneModel.objects.create(category=category, name="Galaxy A56")
+        stock_in = StockIn.objects.create(
+            supplier=Supplier.objects.create(name="Blue Telecom"), import_date=date.today(), created_by=self.cashiers[0]
+        )
+        self.stock_item = StockItem.objects.create(
+            stock_in=stock_in, category=category, model=model, quantity=1, quantity_remaining=1,
+            buying_price="500000", min_selling_price="600000", max_selling_price="700000",
+        )
+
+    def test_only_one_of_two_simultaneous_sales_of_the_last_unit_succeeds(self):
+        start = threading.Barrier(2)
+        results = []
+
+        def sell(i):
+            try:
+                client = APIClient()
+                client.force_authenticate(self.cashiers[i])
+                start.wait(timeout=10)
+                res = client.post(
+                    "/api/v1/sales/sales/",
+                    {
+                        "invoiceNumber": f"INV-RACE-{i}",
+                        "customerName": "Walk-in",
+                        "paymentMethod": "cash",
+                        "items": [{"stockItem": str(self.stock_item.id), "sellingPrice": "650000"}],
+                    },
+                    format="json",
+                )
+                results.append(res.status_code)
+            finally:
+                connection.close()
+
+        threads = [threading.Thread(target=sell, args=(i,)) for i in range(2)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        self.assertEqual(sorted(results), [status.HTTP_201_CREATED, status.HTTP_400_BAD_REQUEST])
+        self.assertEqual(Sale.objects.count(), 1)
+        self.stock_item.refresh_from_db()
+        self.assertEqual(self.stock_item.quantity_remaining, 0)

@@ -1,12 +1,14 @@
 from decimal import Decimal
 
+from django.db import transaction
 from rest_framework import serializers
 
 from loans.models import LoanPayment, LoanSale, LoanSaleItem
 from notifications.services import notify_permission_holders
 from rbac.permissions import user_has_permission
 from sales.models import SaleItem
-from stock.models import LOW_STOCK_THRESHOLD, StockItem
+from stock.models import LOW_STOCK_THRESHOLD
+from stock.services import lock_stock_items
 
 
 class LoanSaleItemSerializer(serializers.ModelSerializer):
@@ -135,6 +137,8 @@ class LoanSaleSerializer(serializers.ModelSerializer):
             return "partial"
         return "open"
 
+    # All or nothing, like a regular sale: a failure on any phone rolls back the whole loan.
+    @transaction.atomic
     def create(self, validated_data):
         items_data = validated_data.pop("items", [])
         # A phone can only ever belong to one sale -- checked against both the
@@ -152,9 +156,10 @@ class LoanSaleSerializer(serializers.ModelSerializer):
                     raise serializers.ValidationError({"detail": f"IMEI {imei} is already recorded against another sale"})
                 seen_imeis.add(imei)
 
+        stock = lock_stock_items(item_data["stock_item"].id for item_data in items_data)
         loan_sale = LoanSale.objects.create(**validated_data, sold_by=self.context["request"].user)
         for item_data in items_data:
-            stock_item = StockItem.objects.get(id=item_data["stock_item"].id)
+            stock_item = stock[item_data["stock_item"].id]
             if stock_item.quantity_remaining < 1:
                 raise serializers.ValidationError({"detail": f"{stock_item} is out of stock"})
             previous_remaining = stock_item.quantity_remaining

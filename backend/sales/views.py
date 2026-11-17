@@ -1,3 +1,4 @@
+from django.db import transaction
 from django.db.models import Prefetch
 from rest_framework import viewsets
 from rest_framework.permissions import IsAuthenticated
@@ -6,6 +7,7 @@ from activitylog.services import log_action
 from rbac.permissions import HasPermission
 from sales.models import Sale, SaleItem
 from sales.serializers import SaleSerializer
+from stock.services import return_units_to_stock
 
 
 class SaleViewSet(viewsets.ModelViewSet):
@@ -41,9 +43,9 @@ class SaleViewSet(viewsets.ModelViewSet):
         # Undoing a mistaken sale must put the phone(s) back into available stock --
         # the create path decrements quantity_remaining by one per item, so deleting
         # has to reverse that or the stock count stays permanently wrong.
-        for item in instance.items.select_related("stock_item"):
-            stock_item = item.stock_item
-            stock_item.quantity_remaining += 1
-            stock_item.save(update_fields=["quantity_remaining"])
-        log_action(user=self.request.user, action="sale.delete", request=self.request, invoice=instance.invoice_number)
-        instance.delete()
+        # One transaction, so a failure part-way can't leave stock returned for a sale that still exists.
+        with transaction.atomic():
+            for item in instance.items.all():
+                return_units_to_stock(item.stock_item_id)
+            log_action(user=self.request.user, action="sale.delete", request=self.request, invoice=instance.invoice_number)
+            instance.delete()

@@ -79,6 +79,19 @@ class LoanSaleTests(APITestCase):
         self.assertIsInstance(res.json(), list)
         self.assertEqual(len(res.json()), 30)
 
+    def test_a_loan_asking_for_more_phones_than_in_stock_is_rolled_back_entirely(self):
+        items = [{"stockItem": str(self.stock_item.id), "imei": "", "sellingPrice": "650000"} for _ in range(4)]
+        res = self.client.post(
+            "/api/v1/loans/loan-sales/",
+            {"invoiceNumber": "LOAN-OVER", "businessName": "Kariakoo Phones Ltd", "items": items},
+            format="json",
+        )
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertFalse(LoanSale.objects.filter(invoice_number="LOAN-OVER").exists())
+        self.assertFalse(LoanSaleItem.objects.exists())
+        self.stock_item.refresh_from_db()
+        self.assertEqual(self.stock_item.quantity_remaining, 3)
+
     def test_paged_lists_honour_page_size_up_to_the_cap(self):
         # Suppliers is an ordinary paged list (25 by default); the client may ask for bigger pages.
         Supplier.objects.bulk_create([Supplier(name=f"S{i}") for i in range(30)])

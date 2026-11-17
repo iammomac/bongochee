@@ -1,3 +1,4 @@
+from django.db import transaction
 from django.db.models import Prefetch
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
@@ -12,6 +13,7 @@ from loans.models import LoanPayment, LoanSale, LoanSaleItem
 from loans.permissions import ANY_LOAN_PERMISSION
 from loans.serializers import LoanPaymentSerializer, LoanSaleSerializer
 from rbac.permissions import HasPermission, user_has_permission
+from stock.services import return_units_to_stock
 
 
 class LoanSaleViewSet(viewsets.ModelViewSet):
@@ -59,12 +61,11 @@ class LoanSaleViewSet(viewsets.ModelViewSet):
         # and silently deleting that history would just make it vanish.
         if instance.payments.exists():
             raise ValidationError({"detail": "Can't delete -- payments have already been recorded against this loan."})
-        for item in instance.items.select_related("stock_item"):
-            stock_item = item.stock_item
-            stock_item.quantity_remaining += 1
-            stock_item.save(update_fields=["quantity_remaining"])
-        log_action(user=self.request.user, action="loan_sale.delete", request=self.request, invoice=instance.invoice_number)
-        instance.delete()
+        with transaction.atomic():
+            for item in instance.items.all():
+                return_units_to_stock(item.stock_item_id)
+            log_action(user=self.request.user, action="loan_sale.delete", request=self.request, invoice=instance.invoice_number)
+            instance.delete()
 
     @action(detail=True, methods=["post"], url_path="payments")
     def add_payment(self, request, pk=None):

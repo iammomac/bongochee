@@ -4,7 +4,8 @@ from rest_framework import serializers
 from loans.models import LoanSaleItem
 from notifications.services import notify_permission_holders
 from sales.models import Sale, SaleItem
-from stock.models import LOW_STOCK_THRESHOLD, StockItem
+from stock.models import LOW_STOCK_THRESHOLD
+from stock.services import lock_stock_items
 
 
 class SaleItemSerializer(serializers.ModelSerializer):
@@ -55,6 +56,9 @@ class SaleSerializer(serializers.ModelSerializer):
     def get_sold_by_name(self, obj):
         return obj.sold_by.get_full_name() or obj.sold_by.username
 
+    # All or nothing: if any phone in the sale fails (e.g. out of stock), the sale and every
+    # stock decrement before it are rolled back -- no half-saved sale, no stock lost.
+    @transaction.atomic
     def create(self, validated_data):
         items_data = validated_data.pop("items", [])
         # Checked up front, before anything is written: a raw DB-level duplicate
@@ -76,13 +80,12 @@ class SaleSerializer(serializers.ModelSerializer):
                     raise serializers.ValidationError({"detail": f"IMEI {imei} is already recorded against another sale"})
                 seen_imeis.add(imei)
 
+        stock = lock_stock_items(item_data["stock_item"].id for item_data in items_data)
         sale = Sale.objects.create(**validated_data, sold_by=self.context["request"].user)
         for item_data in items_data:
-            # Re-fetch fresh rather than reuse item_data["stock_item"] (resolved at
-            # validation time, before any decrements): multiple items in this same
-            # request can reference the same batch, and each iteration must see the
-            # latest quantity_remaining or overselling slips through.
-            stock_item = StockItem.objects.get(id=item_data["stock_item"].id)
+            # The locked, freshly-read row -- shared across items from the same batch, so
+            # each iteration sees the decrements before it and overselling can't slip through.
+            stock_item = stock[item_data["stock_item"].id]
             if stock_item.quantity_remaining < 1:
                 raise serializers.ValidationError({"detail": f"{stock_item} is out of stock"})
             # The seller can bargain below the batch's min/max_selling_price (e.g. clearance) —
