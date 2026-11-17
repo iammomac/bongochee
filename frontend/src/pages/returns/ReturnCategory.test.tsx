@@ -39,6 +39,8 @@ function existingReturn(overrides: Partial<ReturnRecord> = {}): ReturnRecord {
     returnCategoryDisplay: "Battery",
     description: "Drains fast",
     status: "pending",
+    outcome: "",
+    outcomeDisplay: "Not decided yet",
     processedBy: "u1",
     photos: [],
     createdAt: "2026-09-12T00:00:00Z",
