@@ -63,7 +63,9 @@ class LoanSaleViewSet(viewsets.ModelViewSet):
             raise ValidationError({"detail": "Can't delete -- payments have already been recorded against this loan."})
         with transaction.atomic():
             for item in instance.items.all():
-                return_units_to_stock(item.stock_item_id)
+                return_units_to_stock(
+                    item.stock_item_id, "loan_deleted", user=self.request.user, reference=instance.invoice_number
+                )
             log_action(user=self.request.user, action="loan_sale.delete", request=self.request, invoice=instance.invoice_number)
             instance.delete()
 

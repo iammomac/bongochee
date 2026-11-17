@@ -11,6 +11,7 @@ from rest_framework.test import APIClient, APITestCase
 from accounts.models import User
 from catalog.models import Category, PhoneModel
 from rbac.models import Permission, Role
+from returns_app.models import Return, ReturnCategory
 from sales.models import Sale, SaleItem
 from stock.models import StockIn, StockItem
 from suppliers.models import Supplier
@@ -185,38 +186,90 @@ class SaleTests(APITestCase):
         self.assertEqual(res.status_code, status.HTTP_201_CREATED)
         self.assertEqual(SaleItem.objects.filter(imei__isnull=True).count(), 2)
 
-    def test_only_delete_sales_permission_can_delete(self):
-        sale = Sale.objects.create(
-            invoice_number="INV-DEL-1", customer_name="X", payment_method="cash", sold_by=self.seller
-        )
-        res = self.client.delete(f"/api/v1/sales/sales/{sale.id}/")
-        self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN)
+    def _sell_one(self, imei="111111111111111", invoice="INV-SALE-1"):
+        payload = self._sale_payload([{"stockItem": str(self.stock_item.id), "imei": imei, "sellingPrice": "650000"}])
+        payload["invoiceNumber"] = invoice
+        res = self.client.post("/api/v1/sales/sales/", payload, format="json")
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED, res.data)
+        return res.data["id"]
 
+    def _void(self, sale_id, reason="Rung up twice"):
+        return self.client.post(f"/api/v1/sales/sales/{sale_id}/void/", {"reason": reason}, format="json")
+
+    def test_only_delete_sales_permission_can_void(self):
+        sale_id = self._sell_one()
+        self.assertEqual(self._void(sale_id).status_code, status.HTTP_403_FORBIDDEN)
         self.client.force_authenticate(self.supervisor)
-        res = self.client.delete(f"/api/v1/sales/sales/{sale.id}/")
-        self.assertEqual(res.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertEqual(self._void(sale_id).status_code, status.HTTP_200_OK)
 
-    def test_deleting_a_sale_restores_the_stock_it_took(self):
-        # Undoing a mistaken sale must put the phone back into available stock --
-        # otherwise the deleted sale still leaves the batch permanently short.
-        res = self.client.post(
-            "/api/v1/sales/sales/",
-            self._sale_payload(
-                [{"stockItem": str(self.stock_item.id), "imei": "111111111111111", "sellingPrice": "650000"}]
-            ),
-            format="json",
-        )
-        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+    def test_sales_cannot_be_deleted_any_more(self):
+        sale_id = self._sell_one()
+        self.client.force_authenticate(self.supervisor)
+        res = self.client.delete(f"/api/v1/sales/sales/{sale_id}/")
+        self.assertEqual(res.status_code, status.HTTP_405_METHOD_NOT_ALLOWED)
+        self.assertTrue(Sale.objects.filter(pk=sale_id).exists())
+
+    def test_voiding_keeps_the_record_returns_the_stock_and_frees_the_imei(self):
+        sale_id = self._sell_one()
         self.stock_item.refresh_from_db()
         self.assertEqual(self.stock_item.quantity_remaining, 1)
 
         self.client.force_authenticate(self.supervisor)
-        res = self.client.delete(f"/api/v1/sales/sales/{res.data['id']}/")
-        self.assertEqual(res.status_code, status.HTTP_204_NO_CONTENT)
+        res = self._void(sale_id, reason="  Customer   changed mind ")
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertTrue(res.data["is_voided"])
+        self.assertEqual(res.data["void_reason"], "Customer changed mind")
+        self.assertEqual(res.data["voided_by_name"], "supervisor")
 
+        sale = Sale.objects.get(pk=sale_id)
+        self.assertIsNotNone(sale.voided_at)
+        self.assertEqual(sale.items.count(), 1)  # still on record
         self.stock_item.refresh_from_db()
         self.assertEqual(self.stock_item.quantity_remaining, 2)
-        self.assertFalse(SaleItem.objects.filter(imei="111111111111111").exists())
+        # The movement log explains the stock going down and back up.
+        reasons = list(self.stock_item.movements.order_by("created_at").values_list("reason", "change", "reference"))
+        self.assertEqual(reasons, [("sale", -1, "INV-SALE-1"), ("sale_voided", 1, "INV-SALE-1")])
+
+        # The same phone can be sold again.
+        self._sell_one(invoice="INV-SALE-2")
+
+    def test_voiding_needs_a_reason_and_only_happens_once(self):
+        sale_id = self._sell_one()
+        self.client.force_authenticate(self.supervisor)
+        self.assertEqual(self._void(sale_id, reason="  ").status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(self._void(sale_id).status_code, status.HTTP_200_OK)
+        self.assertEqual(self._void(sale_id).status_code, status.HTTP_400_BAD_REQUEST)
+        self.stock_item.refresh_from_db()
+        self.assertEqual(self.stock_item.quantity_remaining, 2)  # put back once, not twice
+
+    def test_voided_sales_are_left_out_of_reports(self):
+        from reports.services import filtered_sale_items
+
+        kept = self._sell_one()
+        voided = self._sell_one(imei="222222222222222", invoice="INV-SALE-2")
+        self.client.force_authenticate(self.supervisor)
+        self._void(voided)
+        today = date.today()
+        self.assertEqual([str(i.sale_id) for i in filtered_sale_items(today, today)], [kept])
+
+    def test_a_sale_with_a_return_is_handled_from_returns_not_voided(self):
+        sale_id = self._sell_one()
+        Return.objects.create(
+            sale_item=SaleItem.objects.get(sale_id=sale_id),
+            return_date=date.today(),
+            return_category=ReturnCategory.objects.get_or_create(name="Battery")[0],
+            processed_by=self.seller,
+        )
+        self.client.force_authenticate(self.supervisor)
+        self.assertEqual(self._void(sale_id).status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_a_voided_sale_cannot_be_edited(self):
+        sale_id = self._sell_one()
+        self.client.force_authenticate(self.supervisor)
+        self._void(sale_id)
+        self.supervisor.role.permissions.add(Permission.objects.create(codename="edit_sales", label="Edit", category="sales"))
+        res = self.client.patch(f"/api/v1/sales/sales/{sale_id}/", {"customerName": "Changed"}, format="json")
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
 
 
 class SaleEditTests(APITestCase):

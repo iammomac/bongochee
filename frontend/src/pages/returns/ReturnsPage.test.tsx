@@ -23,6 +23,8 @@ function makeReturn(overrides: Partial<ReturnRecord> = {}): ReturnRecord {
     returnCategoryDisplay: "Battery",
     description: "Battery drains fast",
     status: "pending",
+    outcome: "",
+    outcomeDisplay: "Not decided yet",
     processedBy: "u1",
     photos: [],
     createdAt: "2026-01-05T00:00:00Z",
@@ -74,5 +76,36 @@ describe("ReturnsPage editing", () => {
       }),
     );
     await waitFor(() => expect(returnsService.listRecentReturns).toHaveBeenCalledTimes(2));
+  });
+});
+
+describe("ReturnsPage phone outcome", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(returnsService.listRecentReturns).mockResolvedValue([makeReturn()]);
+  });
+
+  it("records that the phone went back on sale", async () => {
+    vi.mocked(usePermissions).mockReturnValue({ has: () => true, isAdminOrSuper: true });
+    vi.mocked(returnsService.updateReturnOutcome).mockResolvedValue(
+      makeReturn({ outcome: "restocked", outcomeDisplay: "Back on sale" }),
+    );
+    const user = userEvent.setup();
+    render(<ReturnsPage />);
+
+    await user.click(await screen.findByRole("button", { name: /not decided yet/i }));
+    await user.click(screen.getByRole("option", { name: /back on sale/i }));
+
+    await waitFor(() => expect(returnsService.updateReturnOutcome).toHaveBeenCalledWith("ret-1", "restocked"));
+    expect(await screen.findByRole("button", { name: /back on sale/i })).toBeInTheDocument();
+  });
+
+  it("shows the outcome as plain text without edit_returns", async () => {
+    vi.mocked(usePermissions).mockReturnValue({ has: () => false, isAdminOrSuper: false });
+    vi.mocked(returnsService.listRecentReturns).mockResolvedValue([
+      makeReturn({ outcome: "in_repair", outcomeDisplay: "Sent for repair" }),
+    ]);
+    render(<ReturnsPage />);
+    expect(await screen.findByText("Sent for repair")).toBeInTheDocument();
   });
 });

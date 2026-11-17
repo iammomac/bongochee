@@ -1,6 +1,6 @@
 import { api } from "./api";
 import { fetchAll, unwrapList, type Paginated } from "../lib/pagination";
-import type { ReturnCategory, ReturnRecord, ReturnStatus, SaleItemLookupResult } from "../types";
+import type { ReturnCategory, ReturnOutcome, ReturnRecord, ReturnStatus, SaleItemLookupResult } from "../types";
 
 export async function lookupSaleItem(query: string) {
   const { data } = await api.get<SaleItemLookupResult[]>("/returns/lookup/", {
@@ -59,5 +59,11 @@ export interface ReturnUpdatePayload {
 
 export async function updateReturn(id: string, payload: ReturnUpdatePayload) {
   const { data } = await api.patch<ReturnRecord>(`/returns/returns/${id}/`, payload);
+  return data;
+}
+
+// "restocked" puts the phone back into stock (and back on sale); moving off it takes it out again.
+export async function updateReturnOutcome(id: string, outcome: ReturnOutcome) {
+  const { data } = await api.patch<ReturnRecord>(`/returns/returns/${id}/`, { outcome });
   return data;
 }

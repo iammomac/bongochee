@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Check, ChevronDown, Pencil, Plus, Search, Upload, X } from "lucide-react";
 import { ReturnCategoryPicker } from "../../components/ReturnCategoryPicker";
+import { Select } from "../../components/Select";
 import { TablePager, TableSearch, anyFieldIncludes, usePagedSearch } from "../../components/TablePaging";
 import { useDropdownPosition } from "../../hooks/useDropdownPosition";
 import {
@@ -9,15 +10,24 @@ import {
   listRecentReturns,
   lookupSaleItem,
   updateReturn,
+  updateReturnOutcome,
   updateReturnStatus,
   uploadReturnPhoto,
 } from "../../services/returns";
 import { formatDateTime, todayIso } from "../../lib/dates";
 import { extractErrorMessage } from "../../lib/errors";
 import { usePermissions } from "../../hooks/usePermissions";
-import type { ReturnCategory, ReturnRecord, ReturnStatus, SaleItemLookupResult } from "../../types";
+import type { ReturnCategory, ReturnOutcome, ReturnRecord, ReturnStatus, SaleItemLookupResult } from "../../types";
 
 const RETURN_STATUSES: ReturnStatus[] = ["pending", "processing", "resolved", "cancelled"];
+
+// Only "Back on sale" changes stock: the phone goes back into its batch, ready to sell again.
+const RETURN_OUTCOMES: [ReturnOutcome, string][] = [
+  ["", "Not decided yet"],
+  ["restocked", "Back on sale"],
+  ["to_supplier", "Sent to supplier"],
+  ["in_repair", "Sent for repair"],
+];
 
 // Must match LOOKUP_RESULT_LIMIT in backend/returns_app/views.py; a full list means there may be more.
 const LOOKUP_RESULT_LIMIT = 30;
@@ -292,6 +302,16 @@ export default function ReturnsPage() {
     }
   };
 
+  const handleOutcomeChange = async (id: string, outcome: ReturnOutcome) => {
+    setError(null);
+    try {
+      const updated = await updateReturnOutcome(id, outcome);
+      setRecentReturns((prev) => prev.map((r) => (r.id === id ? updated : r)));
+    } catch (err) {
+      setError(extractErrorMessage(err, "Unable to update what happened to the phone"));
+    }
+  };
+
   const handleStatusChange = async (id: string, status: ReturnStatus) => {
     try {
       await updateReturnStatus(id, status);
@@ -509,6 +529,7 @@ export default function ReturnsPage() {
               <th className="px-4 py-3">Category</th>
               <th className="px-4 py-3">Date</th>
               <th className="px-4 py-3">Status</th>
+              <th className="px-4 py-3">Phone went</th>
               {canEdit ? <th className="px-4 py-3" /> : null}
             </tr>
           </thead>
@@ -537,6 +558,24 @@ export default function ReturnsPage() {
                     </span>
                   )}
                 </td>
+                <td className="px-4 py-3">
+                  {canEdit ? (
+                    <div className="w-40">
+                      <Select
+                        value={ret.outcome}
+                        onChange={(value) => void handleOutcomeChange(ret.id, value as ReturnOutcome)}
+                      >
+                        {RETURN_OUTCOMES.map(([value, label]) => (
+                          <option key={value} value={value}>
+                            {label}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
+                  ) : (
+                    <span className="text-xs text-gray-500">{ret.outcomeDisplay}</span>
+                  )}
+                </td>
                 {canEdit ? (
                   <td className="px-4 py-3 text-right">
                     <button
@@ -553,7 +592,7 @@ export default function ReturnsPage() {
             ))}
             {paging.pageItems.length === 0 ? (
               <tr>
-                <td colSpan={canEdit ? 8 : 7} className="px-4 py-8 text-center text-sm text-gray-400">
+                <td colSpan={canEdit ? 9 : 8} className="px-4 py-8 text-center text-sm text-gray-400">
                   {recentReturns.length === 0 ? "No returns recorded yet" : `No returns match "${paging.search.trim()}"`}
                 </td>
               </tr>

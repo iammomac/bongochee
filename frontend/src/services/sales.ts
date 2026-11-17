@@ -62,6 +62,9 @@ export async function updateSale(id: string, payload: SaleUpdatePayload) {
   return data;
 }
 
-export async function deleteSale(id: string) {
-  await api.delete(`/sales/sales/${id}/`);
+// Sales are never deleted: voiding keeps the record, puts its phones back in stock and
+// leaves it out of every total.
+export async function voidSale(id: string, reason: string) {
+  const { data } = await api.post<Sale>(`/sales/sales/${id}/void/`, { reason });
+  return data;
 }

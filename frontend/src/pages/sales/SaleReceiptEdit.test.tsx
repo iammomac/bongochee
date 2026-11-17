@@ -25,6 +25,10 @@ function makeSale(overrides: Partial<Sale> = {}): Sale {
     soldBy: "u1",
     soldByName: "Amina Seller",
     createdAt: "2026-09-10T09:15:00+03:00",
+    isVoided: false,
+    voidedAt: null,
+    voidedByName: "",
+    voidReason: "",
     ...overrides,
   };
 }

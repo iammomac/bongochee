@@ -43,6 +43,17 @@ class Return(models.Model):
     return_category = models.ForeignKey(ReturnCategory, on_delete=models.PROTECT, related_name="returns")
     description = models.TextField(blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
+
+    # What happened to the phone itself -- decided per return, and changeable (a phone sent
+    # for repair can come back and be put on sale). Only "restocked" touches stock: it puts
+    # the unit back into its batch and frees its IMEI to be sold again.
+    OUTCOME_CHOICES = [
+        ("", "Not decided yet"),
+        ("restocked", "Back on sale"),
+        ("to_supplier", "Sent to supplier"),
+        ("in_repair", "Sent for repair"),
+    ]
+    outcome = models.CharField(max_length=20, choices=OUTCOME_CHOICES, blank=True, default="")
     processed_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="returns_processed")
     created_at = models.DateTimeField(auto_now_add=True)
 

@@ -18,6 +18,7 @@ export function saleTotal(sale: Sale) {
 export function buildReceiptMessage(sale: Sale, total: number) {
   const lines = [
     "BONGO CHEE — Receipt",
+    ...(sale.isVoided ? [`*** VOIDED — not a valid sale (${sale.voidReason}) ***`] : []),
     `Invoice: ${sale.invoiceNumber}`,
     `Date: ${new Date(sale.createdAt).toLocaleString()}`,
     "",

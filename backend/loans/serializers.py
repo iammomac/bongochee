@@ -6,9 +6,9 @@ from rest_framework import serializers
 from loans.models import LoanPayment, LoanSale, LoanSaleItem
 from notifications.services import notify_permission_holders
 from rbac.permissions import user_has_permission
-from sales.models import SaleItem
+from sales.serializers import imei_in_use
 from stock.models import LOW_STOCK_THRESHOLD
-from stock.services import lock_stock_items
+from stock.services import lock_stock_items, take_one_from_stock
 
 
 class LoanSaleItemSerializer(serializers.ModelSerializer):
@@ -148,11 +148,7 @@ class LoanSaleSerializer(serializers.ModelSerializer):
         for item_data in items_data:
             imei = item_data.get("imei")
             if imei:
-                if (
-                    imei in seen_imeis
-                    or SaleItem.objects.filter(imei=imei).exists()
-                    or LoanSaleItem.objects.filter(imei=imei).exists()
-                ):
+                if imei in seen_imeis or imei_in_use(imei):
                     raise serializers.ValidationError({"detail": f"IMEI {imei} is already recorded against another sale"})
                 seen_imeis.add(imei)
 
@@ -162,12 +158,11 @@ class LoanSaleSerializer(serializers.ModelSerializer):
             stock_item = stock[item_data["stock_item"].id]
             if stock_item.quantity_remaining < 1:
                 raise serializers.ValidationError({"detail": f"{stock_item} is out of stock"})
-            previous_remaining = stock_item.quantity_remaining
-            stock_item.quantity_remaining -= 1
-            stock_item.save(update_fields=["quantity_remaining"])
+            previous_remaining, new_remaining = take_one_from_stock(
+                stock_item, "loan_sale", user=loan_sale.sold_by, reference=loan_sale.invoice_number
+            )
             LoanSaleItem.objects.create(loan_sale=loan_sale, **item_data)
 
-            new_remaining = stock_item.quantity_remaining
             if previous_remaining > 0 and new_remaining == 0:
                 notify_permission_holders(
                     "add_stock",

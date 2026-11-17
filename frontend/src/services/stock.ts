@@ -1,6 +1,6 @@
 import { api } from "./api";
 import { unwrapList, type Paginated } from "../lib/pagination";
-import type { Category, PhoneModel, StockItem } from "../types";
+import type { Category, PhoneModel, StockItem, StockMovement } from "../types";
 
 export interface StockInItemPayload {
   category: string;
@@ -95,4 +95,10 @@ export async function downloadStockImportTemplate() {
   link.click();
   link.remove();
   window.URL.revokeObjectURL(url);
+}
+
+/** Every change to a stock line's remaining quantity, newest first, with the reason. */
+export async function getStockHistory(stockItemId: string) {
+  const { data } = await api.get<StockMovement[]>(`/stock/stock-items/${stockItemId}/history/`);
+  return data;
 }

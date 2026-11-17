@@ -72,6 +72,8 @@ class SaleItemLookupView(APIView):
                 )
             )
             .filter(by_words | by_name)
+            # Only phones still with a customer -- not voided sales or phones already back in stock.
+            .filter(is_active=True, sale__voided_at__isnull=True)
             .select_related("sale__sold_by", "stock_item__category", "stock_item__model")
             .order_by("-sale__created_at")[:LOOKUP_RESULT_LIMIT]
         )
@@ -151,6 +153,7 @@ class ReturnViewSet(viewsets.ModelViewSet):
             request=self.request,
             return_id=str(return_record.id),
             status=return_record.status,
+            outcome=return_record.outcome,
         )
 
     @action(detail=True, methods=["post"], url_path="photos", parser_classes=[MultiPartParser])

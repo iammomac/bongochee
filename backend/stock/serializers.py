@@ -1,7 +1,8 @@
 from django.db import transaction
 from rest_framework import serializers
 
-from stock.models import StockIn, StockItem
+from stock.models import StockIn, StockItem, StockMovement
+from stock.services import record_movement
 from suppliers.models import Supplier
 
 
@@ -101,6 +102,7 @@ class StockItemEditSerializer(serializers.ModelSerializer):
             if field in validated_data
         }
 
+        remaining_before = item.quantity_remaining
         if "quantity" in validated_data:
             sold = item.quantity - item.quantity_remaining
             new_quantity = validated_data["quantity"]
@@ -113,6 +115,16 @@ class StockItemEditSerializer(serializers.ModelSerializer):
         for field, value in validated_data.items():
             setattr(item, field, value)
         item.save()
+        if item.quantity_remaining != remaining_before:
+            request = self.context.get("request")
+            record_movement(
+                item,
+                item.quantity_remaining - remaining_before,
+                "adjustment",
+                user=getattr(request, "user", None),
+                reference=item.stock_in.invoice_number,
+                quantity_after=item.quantity_remaining,
+            )
 
         if batch_changes:
             for field, value in batch_changes.items():
@@ -137,9 +149,33 @@ class StockInSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"detail": "Add at least one item to the batch."})
         return attrs
 
+    @transaction.atomic
     def create(self, validated_data):
         items_data = validated_data.pop("items", [])
         stock_in = StockIn.objects.create(**validated_data)
         for item in items_data:
-            StockItem.objects.create(stock_in=stock_in, quantity_remaining=item["quantity"], **item)
+            stock_item = StockItem.objects.create(stock_in=stock_in, quantity_remaining=item["quantity"], **item)
+            record_movement(
+                stock_item,
+                stock_item.quantity,
+                "stock_in",
+                user=stock_in.created_by,
+                reference=stock_in.invoice_number,
+                quantity_after=stock_item.quantity_remaining,
+            )
         return stock_in
+
+
+class StockMovementSerializer(serializers.ModelSerializer):
+    reason_display = serializers.CharField(source="get_reason_display", read_only=True)
+    user_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = StockMovement
+        fields = ("id", "change", "quantity_after", "reason", "reason_display", "reference", "note", "user_name", "created_at")
+        read_only_fields = fields
+
+    def get_user_name(self, obj):
+        if obj.user is None:
+            return ""
+        return obj.user.get_full_name() or obj.user.username

@@ -53,6 +53,10 @@ const mockSale: Sale = {
   soldBy: "u1",
   soldByName: "Seller",
   createdAt: "2026-01-01T00:00:00Z",
+  isVoided: false,
+  voidedAt: null,
+  voidedByName: "",
+  voidReason: "",
 };
 
 describe("SalesPage", () => {
@@ -198,47 +202,55 @@ describe("SalesPage", () => {
     );
   }, 15000);
 
-  describe("undoing a recorded sale", () => {
+  describe("voiding a recorded sale", () => {
     beforeEach(() => {
       vi.mocked(salesService.listRecentSales).mockResolvedValue([mockSale]);
     });
 
-    it("hides the undo action without delete_sales permission", async () => {
+    it("hides the void action without delete_sales permission", async () => {
       vi.mocked(usePermissions).mockReturnValue({ has: () => false, isAdminOrSuper: false });
       render(<SalesPage />);
       await screen.findByText("INV-1");
-      expect(screen.queryByRole("button", { name: /undo/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /^void$/i })).not.toBeInTheDocument();
     });
 
-    it("undoes a sale after confirming, and refreshes the list", async () => {
-      vi.mocked(salesService.listRecentSales)
-        .mockResolvedValueOnce([mockSale])
-        .mockResolvedValueOnce([]);
-      vi.mocked(salesService.deleteSale).mockResolvedValue(undefined);
-      const user = userEvent.setup();
-      render(<SalesPage />);
-
-      await user.click(await screen.findByRole("button", { name: /undo/i }));
-      expect(screen.getByText(/undo this sale/i)).toBeInTheDocument();
-
-      await user.click(screen.getByRole("button", { name: /confirm/i }));
-
-      await waitFor(() => expect(salesService.deleteSale).toHaveBeenCalledWith("sale-1"));
-      await waitFor(() => expect(salesService.listRecentSales).toHaveBeenCalledTimes(2));
-    });
-
-    it("shows the server's error when undoing a sale is rejected", async () => {
-      vi.mocked(salesService.deleteSale).mockRejectedValue({
-        isAxiosError: true,
-        response: { data: { detail: "Unable to undo this sale" } },
+    it("voids a sale with a reason and marks it voided in the list, keeping the row", async () => {
+      vi.mocked(salesService.voidSale).mockResolvedValue({
+        ...mockSale,
+        isVoided: true,
+        voidedAt: "2026-01-02T00:00:00Z",
+        voidedByName: "Boss",
+        voidReason: "Rung up twice",
       });
       const user = userEvent.setup();
       render(<SalesPage />);
 
-      await user.click(await screen.findByRole("button", { name: /undo/i }));
-      await user.click(screen.getByRole("button", { name: /confirm/i }));
+      await user.click(await screen.findByRole("button", { name: /^void$/i }));
+      const confirm = screen.getByRole("button", { name: /void sale/i });
+      expect(confirm).toBeDisabled(); // a reason is required
+      await user.type(screen.getByRole("textbox", { name: /reason for voiding/i }), "Rung up twice");
+      await user.click(confirm);
 
-      expect(await screen.findByText(/unable to undo this sale/i)).toBeInTheDocument();
+      await waitFor(() => expect(salesService.voidSale).toHaveBeenCalledWith("sale-1", "Rung up twice"));
+      expect(await screen.findByText("Voided")).toBeInTheDocument();
+      expect(screen.getByText("INV-1")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /^void$/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /^edit$/i })).not.toBeInTheDocument();
+    });
+
+    it("shows the server's error when voiding is refused", async () => {
+      vi.mocked(salesService.voidSale).mockRejectedValue({
+        isAxiosError: true,
+        response: { data: { detail: "A return is recorded against this sale" } },
+      });
+      const user = userEvent.setup();
+      render(<SalesPage />);
+
+      await user.click(await screen.findByRole("button", { name: /^void$/i }));
+      await user.type(screen.getByRole("textbox", { name: /reason for voiding/i }), "Mistake");
+      await user.click(screen.getByRole("button", { name: /void sale/i }));
+
+      expect(await screen.findByText(/a return is recorded against this sale/i)).toBeInTheDocument();
     });
   });
 });

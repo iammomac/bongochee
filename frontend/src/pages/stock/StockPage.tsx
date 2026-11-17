@@ -2,8 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useFieldArray, useForm, useWatch, type Control } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Download, Pencil, Plus, Search, Trash2, Upload, X } from "lucide-react";
+import { Download, History, Pencil, Plus, Search, Trash2, Upload, X } from "lucide-react";
 import { SupplierPicker } from "../../components/SupplierPicker";
+import { StockHistoryModal } from "../../components/StockHistoryModal";
 import { CategoryPicker } from "../../components/CategoryPicker";
 import { ModelPicker } from "../../components/ModelPicker";
 import {
@@ -463,6 +464,7 @@ export default function StockPage() {
   const [searchText, setSearchText] = useState("");
   const [search, setSearch] = useState("");
   const [editingItem, setEditingItem] = useState<StockItem | null>(null);
+  const [historyItem, setHistoryItem] = useState<StockItem | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -783,7 +785,17 @@ export default function StockPage() {
                   <td className="px-4 py-3">{item.categoryName}</td>
                   <td className="px-4 py-3">{item.modelName}</td>
                   <td className="px-4 py-3">{item.quantity}</td>
-                  <td className="px-4 py-3">{item.quantityRemaining}</td>
+                  <td className="px-4 py-3">
+                    <button
+                      type="button"
+                      onClick={() => setHistoryItem(item)}
+                      title="See every change to this quantity"
+                      className="inline-flex items-center gap-1 text-primary underline decoration-dotted underline-offset-2 hover:decoration-solid"
+                    >
+                      {item.quantityRemaining}
+                      <History size={12} />
+                    </button>
+                  </td>
                   <td className="whitespace-nowrap px-4 py-3">TZS {currency(item.buyingPrice)}</td>
                   <td className="whitespace-nowrap px-4 py-3">
                     {currency(item.minSellingPrice)} – {currency(item.maxSellingPrice)}
@@ -882,6 +894,8 @@ export default function StockPage() {
           </div>
         </div>
       ) : null}
+
+      {historyItem ? <StockHistoryModal item={historyItem} onClose={() => setHistoryItem(null)} /> : null}
 
       {editingItem ? (
         <EditStockItemModal

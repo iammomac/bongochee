@@ -565,3 +565,69 @@ class StockSearchTests(APITestCase):
     def test_search_still_works_with_the_sales_style_filter(self):
         res = self.client.get("/api/v1/stock/stock-items/", {"search": "iphone", "quantity_remaining__gt": 0})
         self.assertEqual(res.json()["results"], [])
+
+
+class StockHistoryTests(APITestCase):
+    """Every change to a line's remaining quantity is logged with its reason."""
+
+    def setUp(self):
+        perms = [
+            Permission.objects.create(codename=code, label=code, category="stock")
+            for code in ("add_stock", "edit_stock", "create_sales")
+        ]
+        role = Role.objects.create(name="Keeper")
+        role.permissions.add(*perms)
+        self.user = User.objects.create_user(
+            username="keeper", password="Str0ngPassw0rd!", phone="255700000077", role=role, must_change_password=False
+        )
+        self.client.force_authenticate(self.user)
+        self.supplier = Supplier.objects.create(name="Blue Telecom")
+        self.category = Category.objects.create(name="Samsung")
+        self.model = PhoneModel.objects.create(category=self.category, name="Galaxy A56")
+
+    def test_receiving_selling_and_correcting_are_all_in_the_history(self):
+        res = self.client.post(
+            "/api/v1/stock/stock-ins/",
+            {
+                "supplier": str(self.supplier.id),
+                "importDate": str(date.today()),
+                "invoiceNumber": "SUP-9",
+                "items": [
+                    {
+                        "category": str(self.category.id),
+                        "model": str(self.model.id),
+                        "quantity": 3,
+                        "buyingPrice": "500000",
+                        "minSellingPrice": "600000",
+                        "maxSellingPrice": "700000",
+                    }
+                ],
+            },
+            format="json",
+        )
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED, res.data)
+        item = StockItem.objects.get()
+
+        sale = self.client.post(
+            "/api/v1/sales/sales/",
+            {
+                "invoiceNumber": "INV-H1",
+                "customerName": "Walk-in",
+                "paymentMethod": "cash",
+                "items": [{"stockItem": str(item.id), "sellingPrice": "650000"}],
+            },
+            format="json",
+        )
+        self.assertEqual(sale.status_code, status.HTTP_201_CREATED, sale.data)
+        self.assertEqual(
+            self.client.patch(f"/api/v1/stock/stock-items/{item.id}/", {"quantity": 5}, format="json").status_code,
+            status.HTTP_200_OK,
+        )
+
+        history = self.client.get(f"/api/v1/stock/stock-items/{item.id}/history/").json()
+        self.assertEqual(
+            [(h["reason"], h["change"], h["quantityAfter"], h["reference"]) for h in reversed(history)],
+            [("stock_in", 3, 3, "SUP-9"), ("sale", -1, 2, "INV-H1"), ("adjustment", 2, 4, "SUP-9")],
+        )
+        self.assertEqual(history[0]["userName"], "keeper")
+        self.assertEqual(history[0]["reasonDisplay"], "Quantity corrected")

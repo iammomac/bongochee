@@ -47,3 +47,37 @@ class StockItem(models.Model):
 
     def __str__(self):
         return f"{self.model} x{self.quantity_remaining}"
+
+
+class StockMovement(models.Model):
+    """One change to a batch's quantity_remaining, and why. Written alongside every change
+    (stock in, sale, voided sale, loan, return back on sale, manual correction), so a line's
+    count can always be traced: 10 -> 9 (sale INV-12) -> 10 (sale INV-12 voided) ..."""
+
+    REASON_CHOICES = [
+        ("stock_in", "Stock received"),
+        ("adjustment", "Quantity corrected"),
+        ("sale", "Sold"),
+        ("sale_voided", "Sale voided"),
+        ("loan_sale", "Sold on loan"),
+        ("loan_deleted", "Loan sale deleted"),
+        ("return_restocked", "Returned, back on sale"),
+        ("return_unrestocked", "Return taken off sale again"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    stock_item = models.ForeignKey(StockItem, on_delete=models.CASCADE, related_name="movements")
+    change = models.IntegerField()  # +n into stock, -n out of it
+    quantity_after = models.PositiveIntegerField()
+    reason = models.CharField(max_length=32, choices=REASON_CHOICES)
+    reference = models.CharField(max_length=128, blank=True)  # invoice number etc., for people to search by
+    note = models.TextField(blank=True)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="stock_movements"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "stock_movements"
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["stock_item", "-created_at"])]

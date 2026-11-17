@@ -2,12 +2,12 @@ import { useEffect, useState } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Pencil, PlusCircle, Receipt as ReceiptIcon, Trash2, X } from "lucide-react";
+import { Ban, Pencil, PlusCircle, Receipt as ReceiptIcon, Trash2, X } from "lucide-react";
 import { PhoneEntryPanel, netPrice, type CartLine } from "../../components/PhoneEntryPanel";
 import { SaleReceipt } from "../../components/SaleReceipt";
 import { Select } from "../../components/Select";
 import { TablePager, TableSearch, anyFieldIncludes, usePagedSearch } from "../../components/TablePaging";
-import { createSale, listRecentSales, updateSale, deleteSale } from "../../services/sales";
+import { createSale, listRecentSales, updateSale, voidSale } from "../../services/sales";
 import { extractErrorMessage } from "../../lib/errors";
 import { openWhatsAppReceipt } from "../../lib/whatsapp";
 import { currency } from "../../lib/money";
@@ -249,10 +249,11 @@ export default function SalesPage() {
   // Edit was opened from the receipt: cancelling goes back to it, and saving shows the
   // updated receipt.
   const [editingFromReceipt, setEditingFromReceipt] = useState(false);
-  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [confirmVoidId, setConfirmVoidId] = useState<string | null>(null);
+  const [voidReason, setVoidReason] = useState("");
+  const [voidingId, setVoidingId] = useState<string | null>(null);
   const canEdit = has("edit_sales");
-  const canDelete = has("delete_sales");
+  const canVoid = has("delete_sales");
 
   const {
     register,
@@ -275,17 +276,18 @@ export default function SalesPage() {
     loadRecentSales();
   }, []);
 
-  const handleDeleteSale = async (id: string) => {
+  const handleVoidSale = async (id: string) => {
+    if (!voidReason.trim()) return;
     setServerError(null);
-    setDeletingId(id);
+    setVoidingId(id);
     try {
-      await deleteSale(id);
-      setConfirmDeleteId(null);
-      loadRecentSales();
+      const updated = await voidSale(id, voidReason.trim());
+      setConfirmVoidId(null);
+      setRecentSales((prev) => prev.map((s) => (s.id === id ? updated : s)));
     } catch (err) {
-      setServerError(extractErrorMessage(err, "Unable to undo this sale"));
+      setServerError(extractErrorMessage(err, "Unable to void this sale"));
     } finally {
-      setDeletingId(null);
+      setVoidingId(null);
     }
   };
 
@@ -466,20 +468,28 @@ export default function SalesPage() {
                   <td className="px-4 py-3 capitalize">{sale.paymentMethod.replace("_", " ")}</td>
                   <td className="px-4 py-3">TZS {currency(saleTotal)}</td>
                   <td className="px-4 py-3">
-                    {confirmDeleteId === sale.id ? (
+                    {confirmVoidId === sale.id ? (
                       <div className="flex items-center justify-end gap-2">
-                        <span className="text-xs text-gray-400">Undo this sale?</span>
+                        <input
+                          value={voidReason}
+                          onChange={(e) => setVoidReason(e.target.value)}
+                          onKeyDown={(e) => e.key === "Enter" && void handleVoidSale(sale.id)}
+                          placeholder="Why void this sale?"
+                          aria-label="Reason for voiding"
+                          autoFocus
+                          className="w-44 rounded-lg border border-gray-200 px-2 py-1 text-xs outline-none focus:border-primary dark:border-gray-800 dark:bg-gray-950"
+                        />
                         <button
                           type="button"
-                          onClick={() => void handleDeleteSale(sale.id)}
-                          disabled={deletingId === sale.id}
+                          onClick={() => void handleVoidSale(sale.id)}
+                          disabled={voidingId === sale.id || !voidReason.trim()}
                           className="text-xs font-medium text-danger hover:underline disabled:opacity-50"
                         >
-                          {deletingId === sale.id ? "Undoing…" : "Confirm"}
+                          {voidingId === sale.id ? "Voiding…" : "Void sale"}
                         </button>
                         <button
                           type="button"
-                          onClick={() => setConfirmDeleteId(null)}
+                          onClick={() => setConfirmVoidId(null)}
                           className="text-xs font-medium text-gray-400 hover:underline"
                         >
                           Cancel
@@ -495,7 +505,15 @@ export default function SalesPage() {
                           <ReceiptIcon size={14} />
                           View receipt
                         </button>
-                        {canEdit ? (
+                        {sale.isVoided ? (
+                          <span
+                            className="rounded-full bg-danger/10 px-2.5 py-1 text-xs font-medium text-danger"
+                            title={`Voided by ${sale.voidedByName} — ${sale.voidReason}`}
+                          >
+                            Voided
+                          </span>
+                        ) : null}
+                        {canEdit && !sale.isVoided ? (
                           <button
                             type="button"
                             onClick={() => {
@@ -508,14 +526,17 @@ export default function SalesPage() {
                             Edit
                           </button>
                         ) : null}
-                        {canDelete ? (
+                        {canVoid && !sale.isVoided ? (
                           <button
                             type="button"
-                            onClick={() => setConfirmDeleteId(sale.id)}
+                            onClick={() => {
+                              setVoidReason("");
+                              setConfirmVoidId(sale.id);
+                            }}
                             className="flex items-center gap-1 text-xs font-medium text-gray-500 hover:underline dark:text-gray-400"
                           >
-                            <Trash2 size={14} />
-                            Undo
+                            <Ban size={14} />
+                            Void
                           </button>
                         ) : null}
                       </div>
@@ -546,7 +567,7 @@ export default function SalesPage() {
           sale={receiptSale}
           onClose={() => setReceiptSale(null)}
           onEdit={
-            canEdit
+            canEdit && !receiptSale.isVoided
               ? () => {
                   setEditingFromReceipt(true);
                   setEditingSale(receiptSale);

@@ -125,6 +125,11 @@ export interface Sale {
   soldBy: string;
   soldByName: string;
   createdAt: string;
+  // A voided sale stays on record but no longer counts: its phones went back into stock.
+  isVoided: boolean;
+  voidedAt: string | null;
+  voidedByName: string;
+  voidReason: string;
 }
 
 export interface AvailablePhone extends StockItem {
@@ -240,6 +245,8 @@ export interface ReturnRecord {
   returnCategoryDisplay: string; // and its name
   description: string;
   status: ReturnStatus;
+  outcome: ReturnOutcome;
+  outcomeDisplay: string;
   processedBy: string;
   photos: ReturnPhoto[];
   createdAt: string;
@@ -416,4 +423,19 @@ export interface LoanReportTotals {
 export interface LoanSalesReportResponse extends ReportDetails {
   rows: LoanReportRow[];
   totals: LoanReportTotals;
+}
+
+/** What happened to a returned phone. Only "restocked" changes stock (puts the unit back on sale). */
+export type ReturnOutcome = "" | "restocked" | "to_supplier" | "in_repair";
+
+export interface StockMovement {
+  id: string;
+  change: number;
+  quantityAfter: number;
+  reason: string;
+  reasonDisplay: string;
+  reference: string;
+  note: string;
+  userName: string;
+  createdAt: string;
 }

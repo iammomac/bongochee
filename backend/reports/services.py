@@ -6,7 +6,7 @@ from collections import Counter
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
-from django.db.models import Count, F, Max, Sum
+from django.db.models import Count, F, Max, Q, Sum
 from django.db.models.functions import TruncDate
 from django.utils import timezone
 
@@ -20,6 +20,8 @@ from stock.models import StockIn, StockItem
 from suppliers.models import Supplier
 
 NET_PRICE = F("selling_price") - F("discount")
+# A stock line's sales that still count -- voided sales are left out of every figure.
+LIVE_SALE_ITEMS = Q(sale_items__sale__voided_at__isnull=True)
 PROFIT = NET_PRICE - F("stock_item__buying_price")
 
 PAYMENT_METHOD_LABELS = {"cash": "Cash", "mobile_money": "Mobile Money", "card": "Card"}
@@ -35,7 +37,9 @@ SALES_GROUP_BY_FIELDS = {
 
 def filtered_sale_items(date_from, date_to, category=None, model=None, supplier=None, user=None, payment_method=None):
     qs = SaleItem.objects.filter(
-        sale__created_at__date__gte=date_from, sale__created_at__date__lte=date_to
+        sale__created_at__date__gte=date_from,
+        sale__created_at__date__lte=date_to,
+        sale__voided_at__isnull=True,  # a voided sale never happened, as far as reports go
     ).select_related(
         "sale__sold_by", "stock_item__category", "stock_item__model", "stock_item__stock_in__supplier"
     )
@@ -312,8 +316,8 @@ def stock_detail_rows(category=None, model=None, supplier=None, date_from=None, 
     if date_to:
         qs = qs.filter(stock_in__import_date__lte=date_to)
     qs = qs.annotate(
-        units_sold=Count("sale_items"),
-        revenue_total=Sum(F("sale_items__selling_price") - F("sale_items__discount")),
+        units_sold=Count("sale_items", filter=LIVE_SALE_ITEMS),
+        revenue_total=Sum(F("sale_items__selling_price") - F("sale_items__discount"), filter=LIVE_SALE_ITEMS),
     ).order_by("-stock_in__import_date", "-stock_in__created_at")
 
     rows = []
@@ -675,9 +679,9 @@ def full_backup_sheets():
 
     sheets.append((
         "Sales",
-        ("Invoice", "Customer", "Customer Phone", "Payment Method", "Sold By", "Date"),
+        ("Invoice", "Customer", "Customer Phone", "Payment Method", "Sold By", "Date", "Voided", "Void Reason"),
         [
-            (s.invoice_number, s.customer_name, s.customer_phone, s.get_payment_method_display(), s.sold_by.get_full_name() or s.sold_by.username, _naive(s.created_at))
+            (s.invoice_number, s.customer_name, s.customer_phone, s.get_payment_method_display(), s.sold_by.get_full_name() or s.sold_by.username, _naive(s.created_at), _naive(s.voided_at) if s.voided_at else "", s.void_reason)
             for s in Sale.objects.select_related("sold_by").order_by("-created_at")
         ],
     ))

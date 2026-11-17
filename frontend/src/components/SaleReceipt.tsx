@@ -90,6 +90,16 @@ export function SaleReceipt({ sale, onClose, onEdit }: Props) {
           <p className="text-xs text-gray-400">Mobile phone sales &amp; service</p>
         </div>
 
+        {sale.isVoided ? (
+          <div className="mt-4 rounded-xl border border-danger/30 bg-danger/10 px-3 py-2 text-center text-sm text-danger">
+            <p className="font-semibold uppercase tracking-wide">Voided — not a valid sale</p>
+            <p className="text-xs">
+              {sale.voidedByName}
+              {sale.voidedAt ? `, ${new Date(sale.voidedAt).toLocaleString()}` : ""} — {sale.voidReason}
+            </p>
+          </div>
+        ) : null}
+
         <div className="mt-4 space-y-1 text-sm">
           <div className="flex justify-between">
             <span className="text-gray-400">Invoice</span>

@@ -9,7 +9,7 @@ from rest_framework.test import APITestCase
 from accounts.models import User
 from catalog.models import Category, PhoneModel
 from rbac.models import Permission, Role
-from returns_app.models import ReturnCategory, ReturnPhoto
+from returns_app.models import Return, ReturnCategory, ReturnPhoto
 from sales.models import Sale, SaleItem
 from stock.models import StockIn, StockItem
 from suppliers.models import Supplier
@@ -263,3 +263,74 @@ class ReturnsTests(APITestCase):
         )
         self.assertEqual(res.status_code, status.HTTP_201_CREATED)
         self.assertEqual(ReturnPhoto.objects.filter(return_record_id=return_id).count(), 1)
+
+
+class ReturnOutcomeTests(APITestCase):
+    """What happens to the returned phone: back on sale (stock +1, IMEI freed), to the
+    supplier, or to repair -- changeable later, keeping stock in step."""
+
+    # Same shop, user and sold phone as ReturnsTests, without re-running its tests.
+    setUp = ReturnsTests.setUp
+    _category = ReturnsTests._category
+    _return_payload = ReturnsTests._return_payload
+
+    def _remaining(self):
+        return StockItem.objects.get(pk=self.sale_item.stock_item_id).quantity_remaining
+
+    def _file(self, **extra):
+        res = self.client.post("/api/v1/returns/returns/", {**self._return_payload(), **extra}, format="json")
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED, res.json())
+        return res.json()
+
+    def _set(self, return_id, outcome):
+        return self.client.patch(f"/api/v1/returns/returns/{return_id}/", {"outcome": outcome}, format="json")
+
+    def test_outcome_starts_undecided_and_leaves_stock_alone(self):
+        created = self._file()
+        self.assertEqual(created["outcome"], "")
+        self.assertEqual(self._remaining(), 4)
+
+    def test_outcome_back_on_sale_returns_the_unit_and_frees_the_imei(self):
+        created = self._file()
+        res = self._set(created["id"], "restocked")
+        self.assertEqual(res.status_code, status.HTTP_200_OK, res.json())
+        self.assertEqual(res.json()["outcomeDisplay"], "Back on sale")
+        self.assertEqual(self._remaining(), 5)
+        self.sale_item.refresh_from_db()
+        self.assertFalse(self.sale_item.is_active)
+        movement = StockItem.objects.get(pk=self.sale_item.stock_item_id).movements.get()
+        self.assertEqual((movement.reason, movement.change, movement.reference), ("return_restocked", 1, "INV-RET-1"))
+        # It no longer shows up as a phone a customer has, so it can't be returned twice.
+        self.assertEqual(self.client.get("/api/v1/returns/lookup/", {"q": "555555555555555"}).json(), [])
+        # Setting it again doesn't add a second unit.
+        self._set(created["id"], "restocked")
+        self.assertEqual(self._remaining(), 5)
+
+    def test_outcome_can_be_chosen_when_filing(self):
+        self._file(outcome="restocked")
+        self.assertEqual(self._remaining(), 5)
+
+    def test_outcome_supplier_and_repair_do_not_touch_stock(self):
+        created = self._file()
+        for outcome in ("to_supplier", "in_repair"):
+            self.assertEqual(self._set(created["id"], outcome).status_code, status.HTTP_200_OK)
+            self.assertEqual(self._remaining(), 4)
+
+    def test_outcome_repaired_phone_can_go_back_on_sale_and_be_taken_off_again(self):
+        created = self._file(outcome="in_repair")
+        self._set(created["id"], "restocked")
+        self.assertEqual(self._remaining(), 5)
+        res = self._set(created["id"], "to_supplier")
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(self._remaining(), 4)
+        self.sale_item.refresh_from_db()
+        self.assertTrue(self.sale_item.is_active)
+
+    def test_outcome_cannot_leave_back_on_sale_once_the_phone_is_sold_again(self):
+        created = self._file(outcome="restocked")
+        # Sold again to someone else, same IMEI.
+        resale = Sale.objects.create(invoice_number="INV-RESALE", customer_name="B", payment_method="cash", sold_by=self.user)
+        SaleItem.objects.create(sale=resale, stock_item=self.sale_item.stock_item, imei="555555555555555", selling_price="600000")
+        res = self._set(created["id"], "in_repair")
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(Return.objects.get(pk=created["id"]).outcome, "restocked")

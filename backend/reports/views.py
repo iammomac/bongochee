@@ -27,7 +27,9 @@ REVENUE_TREND_DAYS = 14
 def _revenue_trend(today):
     window_start = today - timedelta(days=REVENUE_TREND_DAYS - 1)
     daily = (
-        SaleItem.objects.filter(sale__created_at__date__gte=window_start, sale__created_at__date__lte=today)
+        SaleItem.objects.filter(
+            sale__created_at__date__gte=window_start, sale__created_at__date__lte=today, sale__voided_at__isnull=True
+        )
         .annotate(day=TruncDate("sale__created_at"))
         .values("day")
         .annotate(revenue=Sum(F("selling_price") - F("discount")), cost=Sum("stock_item__buying_price"))
@@ -51,8 +53,8 @@ class DashboardSummaryView(APIView):
 
     def get(self, request):
         today = timezone.localdate()
-        sales_today = Sale.objects.filter(created_at__date=today)
-        sale_items_today = SaleItem.objects.filter(sale__created_at__date=today)
+        sales_today = Sale.objects.filter(created_at__date=today, voided_at__isnull=True)
+        sale_items_today = SaleItem.objects.filter(sale__created_at__date=today, sale__voided_at__isnull=True)
         profit_today = sum(item.selling_price - item.discount for item in sale_items_today) - sum(
             item.stock_item.buying_price for item in sale_items_today
         )

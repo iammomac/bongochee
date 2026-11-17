@@ -2,6 +2,7 @@ import openpyxl
 from django.http import HttpResponse
 from openpyxl.styles import Alignment, Font, PatternFill
 from rest_framework import mixins, status, viewsets
+from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.parsers import MultiPartParser
 from rest_framework.permissions import IsAuthenticated
@@ -14,7 +15,12 @@ from rbac.permissions import HasPermission
 from stock.models import StockIn, StockItem
 from activitylog.services import log_action
 from stock.search import apply_stock_search
-from stock.serializers import StockInSerializer, StockItemEditSerializer, StockItemSerializer
+from stock.serializers import (
+    StockInSerializer,
+    StockItemEditSerializer,
+    StockItemSerializer,
+    StockMovementSerializer,
+)
 
 # Who may see the stock list: anyone who stocks, sells, edits or deletes stock needs the rows.
 LIST_PERMISSIONS = ("add_stock", "create_sales", "edit_stock", "delete_stock")
@@ -109,6 +115,13 @@ class StockItemViewSet(
                 item=f"{after['category']} {after['model']}",
                 changes=changes,
             )
+
+    @action(detail=True, methods=["get"], url_path="history")
+    def history(self, request, pk=None):
+        """Every change to this line's remaining quantity, newest first, and why it happened."""
+        stock_item = self.get_object()
+        movements = stock_item.movements.select_related("user")
+        return Response(StockMovementSerializer(movements, many=True).data)
 
     def perform_destroy(self, instance):
         if instance.sale_items.exists():

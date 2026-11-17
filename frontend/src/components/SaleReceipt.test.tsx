@@ -15,6 +15,10 @@ const sale: Sale = {
   soldBy: "u1",
   soldByName: "Dealer",
   createdAt: "2026-11-10T10:00:00Z",
+  isVoided: false,
+  voidedAt: null,
+  voidedByName: "",
+  voidReason: "",
 };
 
 describe("SaleReceipt", () => {

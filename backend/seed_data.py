@@ -28,7 +28,7 @@ permission_codes = [
     ("delete_stock", "Delete Stock", "stock"),
     ("create_sales", "Create Sales", "sales"),
     ("edit_sales", "Edit Sales", "sales"),
-    ("delete_sales", "Delete Sales", "sales"),
+    ("delete_sales", "Void Sales", "sales"),
     ("create_returns", "Create Returns", "returns"),
     ("edit_returns", "Edit Returns", "returns"),
     ("create_loan_sales", "Create Loan Sales", "loans"),

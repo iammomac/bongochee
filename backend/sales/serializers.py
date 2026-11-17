@@ -5,7 +5,16 @@ from loans.models import LoanSaleItem
 from notifications.services import notify_permission_holders
 from sales.models import Sale, SaleItem
 from stock.models import LOW_STOCK_THRESHOLD
-from stock.services import lock_stock_items
+from stock.services import lock_stock_items, take_one_from_stock
+
+
+def imei_in_use(imei, exclude_sale_item=None):
+    """True if a phone with this IMEI is currently sold -- on a live sale (not voided, not
+    returned and put back on sale) or on a loan."""
+    sold = SaleItem.objects.filter(imei=imei, is_active=True)
+    if exclude_sale_item is not None:
+        sold = sold.exclude(pk=exclude_sale_item.pk)
+    return sold.exists() or LoanSaleItem.objects.filter(imei=imei).exists()
 
 
 class SaleItemSerializer(serializers.ModelSerializer):
@@ -50,11 +59,32 @@ class SaleSerializer(serializers.ModelSerializer):
             "sold_by",
             "sold_by_name",
             "created_at",
+            "is_voided",
+            "voided_at",
+            "voided_by_name",
+            "void_reason",
         )
-        read_only_fields = ("id", "sold_by", "sold_by_name", "created_at")
+        read_only_fields = (
+            "id",
+            "sold_by",
+            "sold_by_name",
+            "created_at",
+            "is_voided",
+            "voided_at",
+            "voided_by_name",
+            "void_reason",
+        )
+
+    is_voided = serializers.BooleanField(read_only=True)
+    voided_by_name = serializers.SerializerMethodField()
 
     def get_sold_by_name(self, obj):
         return obj.sold_by.get_full_name() or obj.sold_by.username
+
+    def get_voided_by_name(self, obj):
+        if obj.voided_by is None:
+            return ""
+        return obj.voided_by.get_full_name() or obj.voided_by.username
 
     # All or nothing: if any phone in the sale fails (e.g. out of stock), the sale and every
     # stock decrement before it are rolled back -- no half-saved sale, no stock lost.
@@ -72,11 +102,7 @@ class SaleSerializer(serializers.ModelSerializer):
         for item_data in items_data:
             imei = item_data.get("imei")
             if imei:
-                if (
-                    imei in seen_imeis
-                    or SaleItem.objects.filter(imei=imei).exists()
-                    or LoanSaleItem.objects.filter(imei=imei).exists()
-                ):
+                if imei in seen_imeis or imei_in_use(imei):
                     raise serializers.ValidationError({"detail": f"IMEI {imei} is already recorded against another sale"})
                 seen_imeis.add(imei)
 
@@ -93,15 +119,14 @@ class SaleSerializer(serializers.ModelSerializer):
             # lands below min_selling_price, or below buying_price, still goes through; it just
             # surfaces afterward on the Loss Report (see reports/services.py) so it's visible
             # rather than silently allowed.
-            previous_remaining = stock_item.quantity_remaining
-            stock_item.quantity_remaining -= 1
-            stock_item.save(update_fields=["quantity_remaining"])
+            previous_remaining, new_remaining = take_one_from_stock(
+                stock_item, "sale", user=sale.sold_by, reference=sale.invoice_number
+            )
             SaleItem.objects.create(sale=sale, **item_data)
 
             # Fire exactly once per crossing — not on every subsequent sale of an
             # already-low/empty batch — by comparing the value just before this
             # decrement against just after it.
-            new_remaining = stock_item.quantity_remaining
             if previous_remaining > 0 and new_remaining == 0:
                 notify_permission_holders(
                     "add_stock",
@@ -129,6 +154,8 @@ class SaleSerializer(serializers.ModelSerializer):
         # StockItem.quantity_remaining (decremented once, at creation, in create()
         # above) from reality. The IMEI is only a label on the unit, so a typo in it
         # can be corrected, as long as it doesn't clash with another sold phone.
+        if instance.is_voided:
+            raise serializers.ValidationError({"detail": "This sale was voided and can't be edited."})
         items_data = validated_data.pop("items", None)
         items_by_id = {item.id: item for item in instance.items.all()}
 
@@ -141,11 +168,7 @@ class SaleSerializer(serializers.ModelSerializer):
                 continue  # adding/removing lines isn't supported through this endpoint
             new_imei = item_data.get("imei") if "imei" in item_data else item.imei
             if new_imei != item.imei and new_imei:
-                if (
-                    new_imei in seen_imeis
-                    or SaleItem.objects.filter(imei=new_imei).exclude(pk=item.pk).exists()
-                    or LoanSaleItem.objects.filter(imei=new_imei).exists()
-                ):
+                if new_imei in seen_imeis or imei_in_use(new_imei, exclude_sale_item=item):
                     raise serializers.ValidationError({"detail": f"IMEI {new_imei} is already recorded against another sale"})
             if new_imei:
                 seen_imeis.add(new_imei)
